@@ -48,18 +48,18 @@ dat een fout over het uitvoeringsbeleid, gebruik dan de volledige paden zoals hi
 | Formatteren | `.venv\Scripts\python -m ruff format .` | bij opslaan (ruff-extensie) |
 | App starten | `.venv\Scripts\python -m streamlit run app/Home.py --server.address localhost` | taak **Start app**, of F5 → *Start app* |
 
-**Vergelijking met MODFLOW 6 (optioneel, alleen lokaal).** `tests/test_mf6_comparison.py`
-rekent dezelfde modellen ook met MODFLOW 6. Zonder flopy/mf6 worden die tests overgeslagen.
-Installeren:
+**MODFLOW 6 installeren (Windows, eenmalig).** flopy komt mee met `.[app]`; het programma
+`mf6.exe` haal je zo op:
 
 ```powershell
-.venv\Scripts\python -m pip install -e ".[mf6]"
 .venv\Scripts\get-modflow.exe :flopy --subset mf6
 .venv\Scripts\python -m pytest tests/test_mf6_comparison.py -v
 ```
 
 `get-modflow` downloadt `mf6.exe` van GitHub (MODFLOW-ORG/executables) naar
-`%LOCALAPPDATA%\flopy\bin`. De live app gebruikt MODFLOW 6 niet.
+`%LOCALAPPDATA%\flopy\bin`. Zonder `mf6` rekent de app met de eigen solver en worden de
+MF6-tests overgeslagen. Op een Linux-server (Streamlit Cloud) installeert de app `mf6` zelf
+bij de eerste keer (zie *Veiligheid*).
 
 De app opent op <http://localhost:8501> (alleen lokaal bereikbaar door `--server.address localhost`).
 VS Code: open de map, installeer de aanbevolen extensies (Python, Ruff) en kies de interpreter
@@ -91,7 +91,7 @@ Validatie · Export*.
 | streamlit | de webapp |
 | kaleido | PNG-export van figuren; heeft Chrome nodig (bij ontbreken: `plotly_get_chrome`, of gebruik het camera-icoon in de figuur) |
 | pytest, ruff | tests en lint/format (alleen ontwikkeling) |
-| flopy (optioneel, `.[mf6]`) | alleen voor de validatie tegen MODFLOW 6; niet in `requirements.txt` |
+| flopy (+ matplotlib, vereist door flopy) | MODFLOW 6 als tweede rekenkern: modelbestanden schrijven, draaien en uitlezen |
 
 De app rekent standaard met een eigen solver; MODFLOW 6 (via flopy) is de tweede rekenkern en
 de referentie voor de tests.
@@ -272,8 +272,16 @@ de app onder **Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`)
 
 Goed om te weten:
 
-- De app gebruikt geen geheimen (geen `st.secrets`, API-keys of wachtwoorden) en maakt geen
-  verbinding met andere diensten.
+- De app gebruikt geen geheimen (geen `st.secrets`, API-keys of wachtwoorden).
+- **Veiligheid MODFLOW 6 op de server.** De enige verbinding naar buiten is één download bij
+  de eerste start: het openbare Linux-pakket van MODFLOW 6.7.0 (release 29.0 van
+  MODFLOW-ORG/executables op GitHub), via een vast adres zonder account of token. De app
+  controleert de SHA-256 tegen de waarde in `gwproducten/products/peilopzet_grid/mf6.py`
+  en gebruikt het pakket alleen bij een exacte overeenkomst; alleen `mf6` wordt uitgepakt
+  (± 50 MB, in `~/.cache/grondwatertoolbox`). Mislukt dat, dan rekent de app met de eigen
+  solver. Elke MF6-berekening draait in een eigen tijdelijke map die meteen wordt verwijderd;
+  er worden geen gegevens van bezoekers bewaard of verstuurd. MODFLOW 6 is publiek domein
+  (USGS).
 - `.streamlit/config.toml` bevat bewust geen `[server]`-instellingen; die regelt de cloud.
   Lokaal start de app alleen op localhost via `--server.address localhost`.
 - Gratis plan: ongeveer 1 GB geheugen en gedeelde rekenkracht. Het grootste rooster blijft

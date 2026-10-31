@@ -7,14 +7,21 @@ top layer that carries the phreatic level and the clay transmissivity, on top of
 then the full c lies between the water table and pakket 1, as in the app. The boundaries are
 the app's own groups (RIV, DRN, GHB, WEL, CHD) with identical conductances.
 
-Needs ``flopy`` and the ``mf6`` executable (``pip install -e .[mf6]`` and
-``get-modflow :flopy``).
+Needs ``flopy`` and the ``mf6`` executable. Windows: ``get-modflow :flopy``. Linux (the
+cloud server): :func:`ensure_mf6` downloads one fixed release from GitHub once and checks it
+against a SHA-256 written in this file; no account, token or API key is involved.
 """
 
 from __future__ import annotations
 
+import hashlib
+import os
 import re
 import shutil
+import sys
+import tempfile
+import urllib.request
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -54,12 +61,58 @@ def version() -> str:
 _VERSION: str | None = None
 
 
+# MODFLOW 6.7.0 for Linux, MODFLOW-ORG/executables release 29.0 (public download, fixed version)
+LINUX_ZIP_URL = "https://github.com/MODFLOW-ORG/executables/releases/download/29.0/linux.zip"
+LINUX_ZIP_SHA256 = "ab17192a3531dec61d4f4eab3da10f618e85d1f792d5edc71306a3e06e0e22c3"
+
+
+def _cache_dir() -> Path:
+    base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    return Path(base) / "grondwatertoolbox" / "mf6-29.0"
+
+
 def _exe() -> str | None:
     found = shutil.which("mf6")
     if found:
         return found
-    local = Path.home() / "AppData" / "Local" / "flopy" / "bin" / "mf6.exe"
-    return str(local) if local.exists() else None
+    for local in (
+        Path.home() / "AppData" / "Local" / "flopy" / "bin" / "mf6.exe",  # get-modflow, Windows
+        _cache_dir() / "mf6",  # ensure_mf6, Linux
+    ):
+        if local.exists():
+            return str(local)
+    return None
+
+
+def ensure_mf6(timeout: float = 300.0) -> str | None:
+    """Path of the mf6 executable; on Linux download it once if missing (fixed release,
+    SHA-256 checked, only ``mf6`` extracted). None when not possible; never raises."""
+    found = _exe()
+    if found or not sys.platform.startswith("linux"):
+        return found
+    target = _cache_dir() / "mf6"
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="gwt_mf6dl_") as tmp:
+            archive = Path(tmp) / "linux.zip"
+            digest = hashlib.sha256()
+            with (
+                urllib.request.urlopen(LINUX_ZIP_URL, timeout=timeout) as resp,
+                archive.open("wb") as out,
+            ):
+                while chunk := resp.read(1 << 20):
+                    digest.update(chunk)
+                    out.write(chunk)
+            if digest.hexdigest() != LINUX_ZIP_SHA256:
+                return None  # not the expected file: do not use it
+            with zipfile.ZipFile(archive) as zf:
+                partial = target.with_suffix(".part")
+                partial.write_bytes(zf.read("mf6"))
+            partial.chmod(0o755)
+            partial.replace(target)
+    except OSError, KeyError, zipfile.BadZipFile:
+        return None
+    return str(target)
 
 
 def _layers(params: p3.Params) -> tuple[np.ndarray, list[np.ndarray], list[dict], list[int]]:
