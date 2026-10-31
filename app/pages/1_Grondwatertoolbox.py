@@ -314,6 +314,13 @@ with st.sidebar.expander("Beoordeling en numeriek", expanded=False):
     values["grid_correction"] = st.checkbox(
         "Celgrootte-correctie (De Lange-principe)", value=True, key=f"{KEY}_gc"
     )
+    values["convertible"] = st.checkbox(
+        "Transmissiviteit volgt de natte dikte (zoals MODFLOW 6 'convertible')",
+        value=True,
+        key=f"{KEY}_conv",
+        help="Uit: T = kh·D blijft vast (lineair model). Aan: T = kh × natte dikte in het "
+        "freatisch pakket en in pakketten waar de stijghoogte onder de bovenkant zakt.",
+    )
 
 step1, step2, step3 = st.tabs(STEPS, key=f"{KEY}_step")
 

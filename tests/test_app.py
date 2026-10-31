@@ -302,7 +302,8 @@ def test_grid_product_project_roundtrip() -> None:
     fresh.run()
     fresh.button(key="p3_calc").click().run()
     assert not fresh.exception, [e.value for e in fresh.exception]
-    assert not fresh.warning, [w.value for w in fresh.warning]
+    # same model, same messages (kwel above this surface gives model warnings)
+    assert [w.value for w in fresh.warning] == [w.value for w in at.warning]
     after = fresh.session_state["p3_result"]["params"]
     assert after == before
 

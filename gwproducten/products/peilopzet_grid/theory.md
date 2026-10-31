@@ -13,8 +13,9 @@ opzet**. Het verschil is de verhoging door de opzet, met de 5 cm-contour.
   **basis**-lagenopbouw is een deklaag met freatisch niveau óf een freatisch zandpakket, met
   maximaal 4 watervoerende pakketten. Tot 5 **zones** krijgen eigen laagwaarden en een eigen
   maaiveld (zie *Zones*). Alle hoogtes zijn in m NAP.
-- **Rekenlagen**: een freatische knoop en elk pakket. De transmissiviteit is $T = k_h D$,
-  vast (lineair, "confined"-benadering, zoals gebruikelijk in regionale NL-modellen).
+- **Rekenlagen**: een freatische knoop en elk pakket. De transmissiviteit volgt standaard de
+  **natte dikte** (zoals een MODFLOW 6 "convertible" laag, zie *Meebewegende
+  transmissiviteit*); uitgeschakeld is ze vast, $T = k_h D$ (lineair).
 - **Weerstand tussen knopen**: de $c$ van de scheidende laag plus de verticale weerstand van
   de halve pakketten erboven en eronder, net als in MODFLOW 6 met één modellaag per pakket:
 
@@ -164,9 +165,28 @@ $Q$ [m³/d], apart voor referentie en opzet. Positief $Q$ = onttrekking (verlagi
 over de hele cel: de berekende celstijghoogte is een celgemiddelde en dus minder diep dan de
 stijghoogte in de put zelf (die volgt bij benadering uit Thiem/Peaceman, niet uit dit model).
 
-Omdat het model lineair is bij vaste toestanden van RIV/DRN, is de **verlaging door de
-putten** de oplossing van hetzelfde stelsel met alleen de putdebieten als belasting (alle
-andere randen op 0, toestanden van de laatste iteratie). Die kaart toont de app apart.
+De **verlaging door de putten** toont de app apart. Met vaste $T$ is het model lineair bij
+vaste toestanden van RIV/DRN: de verlaging is dan de oplossing van hetzelfde stelsel met
+alleen de putdebieten als belasting. Met meebewegende $T$ is het niet-lineair; dan rekent de
+app de opzetsituatie nog een keer zonder putten en is de verlaging het verschil.
+
+**Meebewegende transmissiviteit (MODFLOW 6 "convertible").** Per cel is
+
+$$
+T = k_h\, b ,\qquad b = \min\!\big(\max(\min(h, z_\text{top}) - z_\text{bot},\; 0{,}01\,D),\; D\big),
+$$
+
+met $b$ de natte dikte. Voor het freatisch zandpakket is $z_\text{top}$ het maaiveld; een
+pakket onder een scheidende laag blijft volledig gevuld zolang de stijghoogte boven de
+bovenkant ligt, en wordt plaatselijk freatisch als ze eronder zakt (melding). De knoop in een
+deklaag van klei houdt een vaste $T$ (verwaarloosbaar klein). Tussen cellen geldt het
+harmonisch gemiddelde van $k_h b$, zoals MODFLOW 6 standaard (zonder upstream-weging). De
+verticale weerstand $\tfrac{1}{2}D/k_v$ blijft op de volle dikte (MODFLOW 6 zonder
+VARIABLECV). $T$ wordt in dezelfde Picard-iteratie bijgewerkt als de RIV/DRN-toestanden, tot
+de stijghoogte minder dan $10^{-5}$ m verandert. Een cel met de minimale natte dikte (1 % van
+$D$) is **droog**: ze blijft meerekenen, zoals bij de Newton-methode van MODFLOW 6, en de
+kaarten tonen daar de onderkant van de laag. Validatie: freatische strook met neerslag tussen
+twee vaste peilen tegen Dupuit, $h^2 = h_0^2 + (N/k)\,x(L-x)$, binnen 1 cm.
 
 **Algemene stijghoogterand (GHB).** Een GHB-groep is een set cellen in één rekenlaag met een
 externe stijghoogte $h_\text{ext}$ (referentie en opzet apart) en een weerstand $c_\text{ghb}$
@@ -203,7 +223,8 @@ $$
 
 ## Aannames en geldigheid
 
-- **Stationair** en **lineaire transmissiviteit** (verzadigde dikte vast).
+- **Stationair**. Transmissiviteit standaard volgens de natte dikte; de verticale weerstand
+  rekent met de volle laagdikte.
 - **Ondergrond**: basis plus maximaal 5 zones met dezelfde laagstructuur; maximaal 4
   watervoerende pakketten. Een sprong in de lagenopbouw ligt op een celgrens; binnen een cel
   is de ondergrond uniform.
@@ -215,9 +236,10 @@ $$
   gesloten rand is een waterscheiding. Leg de rand ver genoeg van de opzet, of controleer de
   invloed door beide te proberen. Met een kwel-onderrand is het vaak logisch om alleen het
   diepste pakket aan de rand vast te houden (rand per laag).
-- **Putten** veranderen de transmissiviteit niet. Een put in de freatische laag die die laag
-  sterk verlaagt (meer dan ~25 % van de dikte) valt buiten de lineaire aanname; de app
-  waarschuwt dan. De celstijghoogte bij een put is een celgemiddelde.
+- **Putten**: met meebewegende $T$ wordt een sterk verlaagde freatische laag dunner en de
+  verlaging groter; cellen die droogvallen meldt de app. Met vaste $T$ waarschuwt de app bij
+  een verlaging van meer dan ~25 % van de dikte. De celstijghoogte bij een put is een
+  celgemiddelde.
 - **Kwel-onderrand**: $\varphi$ is vast en gelijk in referentie en opzet.
 - **Watergangen** volgen de cellen; kruisingen en bochten zijn gewoon cellen. De
   conductance per cel hangt niet af van de richting van de watergang in de cel.
