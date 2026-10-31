@@ -319,3 +319,13 @@ def test_invalid_project_file_gives_message() -> None:
     assert parse_project("geen json")[1]
     assert "geen projectbestand" in parse_project('{"a": 1}')[1][0]
     assert "versie" in parse_project('{"product": "peilopzet_grid", "versie": 99}')[1][0].lower()
+
+
+def test_grid_product_validation_benchmark_button() -> None:
+    """The benchmark in the validation tab runs for the allowed cell sizes."""
+    page = str(APP / "pages" / "1_Grondwatertoolbox.py")
+    at = AppTest.from_file(page, default_timeout=180).run()
+    at.button(key="p3_calc").click().run()
+    at.button(key="p3_bench").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert not at.error, [e.value for e in at.error]

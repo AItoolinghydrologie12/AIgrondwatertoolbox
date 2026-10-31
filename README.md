@@ -48,6 +48,19 @@ dat een fout over het uitvoeringsbeleid, gebruik dan de volledige paden zoals hi
 | Formatteren | `.venv\Scripts\python -m ruff format .` | bij opslaan (ruff-extensie) |
 | App starten | `.venv\Scripts\python -m streamlit run app/Home.py --server.address localhost` | taak **Start app**, of F5 → *Start app* |
 
+**Vergelijking met MODFLOW 6 (optioneel, alleen lokaal).** `tests/test_mf6_comparison.py`
+rekent dezelfde modellen ook met MODFLOW 6. Zonder flopy/mf6 worden die tests overgeslagen.
+Installeren:
+
+```powershell
+.venv\Scripts\python -m pip install -e ".[mf6]"
+.venv\Scripts\get-modflow.exe :flopy --subset mf6
+.venv\Scripts\python -m pytest tests/test_mf6_comparison.py -v
+```
+
+`get-modflow` downloadt `mf6.exe` van GitHub (MODFLOW-ORG/executables) naar
+`%LOCALAPPDATA%\flopy\bin`. De live app gebruikt MODFLOW 6 niet.
+
 De app opent op <http://localhost:8501> (alleen lokaal bereikbaar door `--server.address localhost`).
 VS Code: open de map, installeer de aanbevolen extensies (Python, Ruff) en kies de interpreter
 `.venv`. In `.vscode/launch.json` staan *Start app* en *Debug huidige test*.
@@ -78,9 +91,9 @@ Validatie · Export*.
 | streamlit | de webapp |
 | kaleido | PNG-export van figuren; heeft Chrome nodig (bij ontbreken: `plotly_get_chrome`, of gebruik het camera-icoon in de figuur) |
 | pytest, ruff | tests en lint/format (alleen ontwikkeling) |
+| flopy (optioneel, `.[mf6]`) | alleen voor de validatie tegen MODFLOW 6; niet in `requirements.txt` |
 
-Er zijn nog geen flopy/MODFLOW 6 en xarray nodig: de huidige producten rekenen met eigen
-solvers.
+De app rekent met een eigen solver; flopy en MODFLOW 6 dienen alleen als controle.
 
 ## Rekenmethode en verantwoording
 
@@ -140,6 +153,15 @@ de app onder **Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`)
   dit helemaal af van wat de modelleur als conductance invult.
 
 **Validatie** (geautomatiseerde tests, `pytest`)
+- **Tegen MODFLOW 6.7** (flopy; elke laag een MF6-modellaag, scheidende lagen met
+  K33 = D/c, dezelfde randgroepen en conductances): stijghoogten in alle lagen gelijk binnen
+  10⁻⁶ m voor het standaardmodel (vaste en meebewegende T), een deklaag met put in pakket 1,
+  kwel en doorlopende rand, een zone met rand per laag, en een freatische put waarbij de natte
+  dikte van 10 naar 7,7 m gaat (MF6 "convertible", standaardformulering). MF6 met Newton
+  wijkt daar tot enkele cm af in de putcel, door de stroomopwaartse weging van de natte dikte
+  (verschil tussen de twee MF6-formuleringen). Bij **droogvallende cellen** wijken app en MF6
+  af: MF6-Newton convergeerde in het testgeval niet, MF6 zonder Newton zet droge cellen uit;
+  de app rekent door met 1 % natte dikte (zie *Bekende beperkingen*).
 - Lange evenwijdige watergangen tegen de analytische meerlagenoplossing (eigenwaarde-aanpak,
   Bruggeman/Hemker): met celgrootte-correctie binnen 0,6 % voor 2 t/m 4 pakketten, ook met
   anisotropie.
@@ -185,9 +207,14 @@ de app onder **Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`)
   geïnterpoleerd tussen celmiddens; pieken tussen twee celmiddens worden dus afgevlakt.
 - Rekentijd: het grootste rooster (100 × 100 cellen × 2 lagen) ca. 0,2 s per
   berekening (referentie + opzet); op een gedeelde cloudserver langer.
-- Maximaal 4 pakketten. Met meebewegende transmissiviteit kost een model met veel
-  droogvallende cellen rond putten meer rekentijd (lokaal tot ca. 4–5 s bij 100 × 100 cellen
-  en 4 pakketten; zonder droogval ca. 1,5 s).
+- Maximaal 4 pakketten. Met meebewegende transmissiviteit kost een model met
+  droogvallende cellen rond putten meer rekentijd (lokaal ca. 5 s bij 100 × 100 cellen en 4
+  pakketten; zonder droogval ca. 1,5 s). Een cel die tussen nat en droog blijft wisselen wordt
+  per cel gedempt (zoals delta-bar-delta in MF6).
+- **Droogvallende cellen** zijn een benadering: het putdebiet wordt niet verlaagd en het
+  water komt dan van onderen of van opzij. Rond zo'n put is de uitkomst onzeker; de app meldt
+  het aantal droge cellen. Een put die een freatische laag laat droogvallen is in de praktijk
+  meestal niet haalbaar.
 - **Anisotropie** kv/kh per pakket (standaard 0,33): de weerstand tussen pakketten is
   c + D₁/(2kv₁) + D₂/(2kv₂), zoals MODFLOW 6 met één laag per pakket. Ook de radiale
   weerstand van watergangen rekent met kv/kh (Ernst met opgerekte verticale maten).
