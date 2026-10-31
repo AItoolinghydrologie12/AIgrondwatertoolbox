@@ -1,0 +1,25 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Tests",
+            "type": "shell",
+            "command": "${workspaceFolder}/.venv/Scripts/python.exe -m pytest",
+            "group": "test",
+            "problemMatcher": []
+        },
+        {
+            "label": "Lint",
+            "type": "shell",
+            "command": "${workspaceFolder}/.venv/Scripts/python.exe -m ruff check . ; ${workspaceFolder}/.venv/Scripts/python.exe -m ruff format --check .",
+            "problemMatcher": []
+        },
+        {
+            "label": "Start app",
+            "type": "shell",
+            "command": "${workspaceFolder}/.venv/Scripts/python.exe -m streamlit run app/Home.py --server.address localhost",
+            "isBackground": true,
+            "problemMatcher": []
+        }
+    ]
+}

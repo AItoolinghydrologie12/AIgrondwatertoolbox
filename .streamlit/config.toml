@@ -1,0 +1,10 @@
+# Geen [server]-instellingen: Community Cloud regelt de server zelf. Lokaal start de app
+# alleen op localhost via --server.address localhost (VS Code-taak, launch.json, README).
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+primaryColor = "#0b5394"
+borderColor = "#d0dbe8"
+showWidgetBorder = true

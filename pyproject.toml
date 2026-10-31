@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gwproducten"
+version = "0.1.0"
+description = "Grondwatertoolbox: rekentools voor geohydrologische vraagstukken (rekenkern + Streamlit-app)"
+readme = "README.md"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+    "numpy==2.5.4",
+    "scipy==1.18.1",
+    "pandas==3.1.0",
+    "plotly==7.1.0",
+]
+
+[project.optional-dependencies]
+app = [
+    "streamlit==1.66.1",
+    "kaleido==1.5.0",
+]
+dev = [
+    "pytest==9.2.0",
+    "ruff==0.17.3",
+]
+
+[tool.setuptools.packages.find]
+include = ["gwproducten*"]
+
+[tool.setuptools.package-data]
+"gwproducten.products" = ["*/*.md"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "N", "SIM", "NPY"]
+ignore = ["N802", "N803", "N806"]  # physics notation: T, D, A, B, C as names
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["SIM300"]  # `x == pytest.approx(y)` reads naturally
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
