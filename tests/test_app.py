@@ -352,3 +352,25 @@ def test_grid_product_with_modflow6_engine() -> None:
     at.button(key="p3_mf6zip").click().run()
     assert not at.exception, [e.value for e in at.exception]
     assert at.session_state["p3_mf6zip_for"] == at.session_state["p3_result"]["params"]
+
+
+def test_engine_comparison_page() -> None:
+    """Page 'Rekenkern MODFLOW 6': explanation without a model; with the last model of the
+    Grondwatertoolbox page the comparison button shows tiny differences."""
+    from gwproducten.products import peilopzet_grid as p3
+    from gwproducten.products.peilopzet_grid import mf6
+
+    page = str(APP / "pages" / "2_Rekenkern_MODFLOW6.py")
+    at = AppTest.from_file(page, default_timeout=180).run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("Bereken eerst" in i.value for i in at.info)
+    if not mf6.available():
+        pytest.skip("flopy/mf6 niet geïnstalleerd")
+    par = p3.Params()
+    at.session_state["p3_result"] = {"params": par, "res": p3.compute(par), "wcs": []}
+    at.run()
+    at.button(key="p3_cmp").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert float(at.metric[0].value.split()[0]) < 1e-5  # max head difference [m]
+    at.radio(key="p3_cmp_sit").set_value("referentie").run()
+    assert not at.exception, [e.value for e in at.exception]

@@ -24,4 +24,11 @@ for product in (peilopzet_grid,):
         st.markdown(f"*{m['categorie']} · {m['regime']}*")
         st.markdown("\n".join(f"- {method}" for method in m["methoden"]))
 
+with st.container(border=True):
+    st.subheader("Rekenkern MODFLOW 6")
+    st.markdown(
+        "Uitleg van de twee rekenkernen (eigen solver en MODFLOW 6), wat gelijk is en wat "
+        "verschilt, en een vergelijking van je eigen model met beide."
+    )
+
 st.caption(f"gwproducten {__version__} · eenheden m en d · verlaging positief = lagere stijghoogte")
