@@ -68,9 +68,15 @@ MAP_CONFIG = {"scrollZoom": True, "displaylogo": False}
 WC_MODES = {"lijn": "lijn klikken", "cellen": "cellen selecteren", "wissen": "cellen weghalen"}
 BOUNDARY_LABEL = {
     "vast": "vaste stijghoogte",
+    "doorlopend": "doorlopend pakket",
     "gesloten": "gesloten",
     "per_laag": "per laag",
 }
+BOUNDARY_HELP = (
+    "Vaste stijghoogte: de buitenste ring houdt het randpeil (CHD). Doorlopend pakket: het "
+    "pakket loopt buiten het model door; de rand watert af naar het randpeil met de weerstand "
+    "van een half oneindig lekkend pakket (spreidingslengte λ). Gesloten: geen stroming."
+)
 
 page_header(p3.META)
 ss = st.session_state
@@ -380,27 +386,33 @@ with step1:
             nodes = stack.nodes if not stack.errors() else []
             values["boundary"] = st.radio(
                 "Modelrand (buitenste ring cellen)", p3.BOUNDARIES, horizontal=True,
-                key=f"{KEY}_bnd", format_func=BOUNDARY_LABEL.get,
+                key=f"{KEY}_bnd", format_func=BOUNDARY_LABEL.get, help=BOUNDARY_HELP,
             )  # fmt: skip
-            if values["boundary"] == "vast":
+            if values["boundary"] in ("vast", "doorlopend"):
                 values["boundary_head"] = number(
                     p3.Params, "boundary_head", DEFAULTS.boundary_head, f"{KEY}_bh", 0.1
                 )
             elif values["boundary"] == "per_laag":
                 per_layer: list[float | None] = []
+                kinds: list[str] = []
                 for node in nodes:
                     c1, c2 = st.columns([1, 1], vertical_alignment="bottom")
-                    fixed_here = c1.toggle(
-                        f"{node.label}: vaste stijghoogte", value=True,
-                        key=f"{KEY}_bfix_{node.key}",
+                    kind_key = f"{KEY}_bkind_{node.key}"
+                    if kind_key not in ss and ss.get(f"{KEY}_bfix_{node.key}") is False:
+                        ss[kind_key] = "gesloten"  # project saved with the old on/off switch
+                    kind = c1.selectbox(
+                        f"Rand {node.label}", p3.RING_KINDS, key=kind_key,
+                        format_func=BOUNDARY_LABEL.get,
                     )  # fmt: skip
                     head = c2.number_input(
                         f"Stijghoogte rand {node.label} [m NAP]", -50.0, 50.0,
                         DEFAULTS.boundary_head, 0.1, format="%g", key=f"{KEY}_bh_{node.key}",
-                        disabled=not fixed_here,
+                        disabled=kind == "gesloten",
                     )  # fmt: skip
-                    per_layer.append(head if fixed_here else None)
+                    per_layer.append(None if kind == "gesloten" else head)
+                    kinds.append(kind)
                 values["boundary_layers"] = tuple(per_layer)
+                values["boundary_kinds"] = tuple(kinds)
             values["seepage"] = st.toggle(
                 "Kwel/wegzijging via de onderrand", value=False, key=f"{KEY}_kwel",
                 help="Diep pakket onder de onderste rekenlaag met een vaste stijghoogte φ, "

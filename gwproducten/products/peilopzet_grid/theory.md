@@ -28,8 +28,26 @@ $$
   zijn volle $c$ ligt tussen grondwaterstand en pakket 1. Ook de radiale weerstand van
   watergangen rekent met de anisotropie (zie *Conductance per cel*).
 - **Neerslagoverschot** $N$ [m/d] op de freatische knoop van elke cel.
-- **Modelrand**: vaste stijghoogte in de buitenste ring cellen (alle lagen), gesloten (geen
-  stroming), of **per laag** een vaste stijghoogte of gesloten.
+- **Modelrand**: vaste stijghoogte in de buitenste ring cellen (alle lagen), **doorlopend
+  pakket**, gesloten (geen stroming), of **per laag** een van deze drie.
+
+**Doorlopend pakket.** Buiten het model loopt elk pakket door als half oneindig lekkend
+pakket dat ongestoord op het randpeil $h_r$ staat. Een afwijking aan de rand dempt daar uit
+als $e^{-x/\lambda}$, met $\lambda = \sqrt{T c_\text{eff}}$ en $1/c_\text{eff}$ de som van de
+geleidingen naar de aangrenzende knopen (en de kwel-onderrand voor de onderste laag). De
+randcel krijgt daarom per buitenzijde een GHB naar $h_r$ met
+
+$$
+C = \frac{T\,\Delta y}{\Delta x/2 + \lambda} ,
+$$
+
+een halve cel plus de Mazure-weerstand $\lambda/T$ per meter rand; een hoekcel heeft twee
+buitenzijden. Zonder lekkage ($\lambda \to \infty$) is $C = 0$: de rand werkt dan als
+gesloten. Dit is de randvoorwaarde voor één lekkend pakket, per laag toegepast; de koppeling
+tussen de lagen buiten het model is dus benaderd, en $T$ is de nominale $k_h D$. Validatie: een
+put met de rand op $2\lambda$ volgt De Glee even goed als een model met de rand op $5\lambda$; en
+een model van 1 km met deze rand wijkt bij een opzet van 0,2 m maximaal 1,1 cm af van het
+midden van een model van 2,5 km (vaste rand op 1 km: 18 cm, gesloten: 10 cm).
 
 Per cel en per knoop $i$ geldt de waterbalans (eindige volumes, celcentra):
 
@@ -233,8 +251,10 @@ $$
   oplossing rond de watergang grof. De celgrootte-correctie compenseert de uitwisseling, maar
   niet het verloop binnen de cel. De app waarschuwt als $\lambda < \Delta x$.
 - **Rand**: een vaste rand houdt de stijghoogte in alle lagen vast op het opgegeven peil; een
-  gesloten rand is een waterscheiding. Leg de rand ver genoeg van de opzet, of controleer de
-  invloed door beide te proberen. Met een kwel-onderrand is het vaak logisch om alleen het
+  gesloten rand is een waterscheiding; een doorlopende rand neemt aan dat de omgeving
+  ongestoord op het randpeil staat (geen andere watergangen of onttrekkingen buiten het
+  model). Leg de rand ver genoeg van de opzet, of controleer de invloed door de randtypen te
+  vergelijken. Met een kwel-onderrand is het vaak logisch om alleen het
   diepste pakket aan de rand vast te houden (rand per laag).
 - **Putten**: met meebewegende $T$ wordt een sterk verlaagde freatische laag dunner en de
   verlaging groter; cellen die droogvallen meldt de app. Met vaste $T$ waarschuwt de app bij

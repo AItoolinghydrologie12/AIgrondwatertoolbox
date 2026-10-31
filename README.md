@@ -116,7 +116,7 @@ de app onder **Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`)
 | Buisdrainage, maaivelddrainage | DRN op drainniveau resp. maaiveld | DRN |
 | Putten | vast debiet per cel en laag | WEL |
 | Vaste peilen met weerstand, kwel | GHB per celgroep; kwel als GHB op de onderste laag | GHB |
-| Modelrand | buitenste ring vaste stijghoogte (per laag) of gesloten | CHD of geen-stroming |
+| Modelrand | buitenste ring vaste stijghoogte, doorlopend pakket (GHB met C = T·Δy/(Δx/2 + λ)) of gesloten, ook per laag | CHD, GHB (conductance zelf bepalen) of geen-stroming |
 | Aan/uit van RIV/DRN | Picard-iteratie tot geen toestand meer wisselt | idem, binnen de buitenste iteraties van IMS |
 | Lineaire oplosser | directe LU-ontbinding (SuperLU) met hergebruik als preconditioner (PCG, tolerantie 10⁻¹²) | iteratief (IMS: CG/BiCGSTAB met ILU) |
 | Tijd | alleen stationair (referentie en opzet) | stationair en tijdsafhankelijk |
@@ -199,8 +199,11 @@ de app onder **Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`)
 - Watergangen liggen midden in hun cel; bij spreidingslengtes kleiner dan de cel is het
   verloop rond de watergang grof (de app waarschuwt). De celgrootte-correctie (De
   Lange-principe) houdt de uitwisseling goed: benchmark −0,3 % bij 25 m (+3,5 % zonder).
-- Modelrand: vast (alle lagen één peil), gesloten, of per laag vast/gesloten; leg de rand
-  ver genoeg van de opzet.
+- Modelrand: vast (alle lagen één peil), doorlopend pakket, gesloten, of per laag een van
+  deze drie. *Doorlopend pakket* neemt aan dat de omgeving ongestoord op het randpeil staat
+  en benadert per laag een half oneindig lekkend pakket (spreidingslengte λ); een laag zonder
+  lekkage krijgt zo een gesloten rand. Test: 1 km-model wijkt 1,1 cm af van een groot model
+  bij 0,2 m opzet (vaste rand 18 cm). Leg de rand ver genoeg van de opzet.
 - **Putten** (WEL): vast debiet per cel en laag, apart voor referentie en opzet. De
   stijghoogte bij een put is een celgemiddelde (niet de putstijghoogte). Bij een verlaging van
   meer dan 25 % van de freatische laagdikte waarschuwt de app (T blijft vast). Validatie: De
