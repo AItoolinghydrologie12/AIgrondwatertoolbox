@@ -1,7 +1,7 @@
 """Steady plan-view grid model (cell-centred finite volumes, quasi-3D layers).
 
-Uniform square cells, one computational layer per node with fixed transmissivity,
-recharge on the top node, and MODFLOW-style head-dependent boundaries:
+Uniform square cells, one computational layer per node, recharge on the top node, and
+MODFLOW-style head-dependent boundaries:
 
 - ``riv``: flux C (stage - h) while h > bottom, else the fixed C (stage - bottom);
 - ``drn``: flux C (level - h) while h > level, else 0;
@@ -10,7 +10,9 @@ recharge on the top node, and MODFLOW-style head-dependent boundaries:
 plus fixed fluxes (wells) and an outer ring of fixed heads per layer.
 
 The on/off switching is solved by Picard iteration: solve, update every state, repeat until
-no state changes. Absolute heads [m]; flux positive into the groundwater.
+no state changes. A layer can be *convertible* (MODFLOW 6 ICELLTYPE > 0): its transmissivity
+follows the saturated thickness and is updated in the same iteration until the heads settle.
+Absolute heads [m]; flux positive into the groundwater.
 
 The states only change the diagonal, so one LU factorisation (minimum-degree ordering) is
 reused: exactly for an identical matrix, otherwise as preconditioner for conjugate gradients.
@@ -28,40 +30,50 @@ from scipy.sparse.linalg import LinearOperator, cg, splu
 
 PCG_RTOL = 1e-12
 PCG_MAXITER = 40  # more iterations than this: refactorise instead
+PCG_MAXITER_REUSE = 12  # same, when many coefficients changed a little (``reuse``)
 # PCG converges in at most k+1 steps for k changed entries; refactorise beyond this many
 PCG_MAX_CHANGED = 50
 PCG_MAX_CHANGED_FRACTION = 0.02
+MAX_CACHED_LU = 3  # factorisations kept (reference, opzet, run without wells)
+HEAD_TOL = 1e-5  # [m] head change between iterations that ends the convertible iteration
+MIN_SATURATED_FRACTION = 0.01  # saturated thickness never below 1 % of the layer thickness
 
 
 class Factorization:
-    """Cached LU of the last factorised matrix; solves nearby matrices by preconditioned CG."""
+    """Cache of the last few LU factorisations; a nearby matrix is solved by CG
+    preconditioned with the closest cached LU."""
 
     def __init__(self) -> None:
-        self.matrix: sp.csc_matrix | None = None
-        self.lu = None
+        self.cache: list[tuple[sp.csc_matrix, object]] = []
         self.factorizations = 0
 
-    def _factor(self, M: sp.csc_matrix) -> None:
-        self.matrix = M
-        self.lu = splu(M, permc_spec="MMD_AT_PLUS_A", options={"SymmetricMode": True})
+    def _factor(self, M: sp.csc_matrix):
+        lu = splu(M, permc_spec="MMD_AT_PLUS_A", options={"SymmetricMode": True})
+        self.cache = [*self.cache, (M, lu)][-MAX_CACHED_LU:]
         self.factorizations += 1
+        return lu
 
-    def solve(self, M: sp.csc_matrix, b: np.ndarray, x0: np.ndarray | None = None) -> np.ndarray:
-        if self.matrix is None or self.matrix.shape != M.shape:
-            self._factor(M)
-            return self.lu.solve(b)
-        changed = (self.matrix != M).nnz
+    def solve(
+        self, M: sp.csc_matrix, b: np.ndarray, x0: np.ndarray | None = None, reuse: bool = False
+    ) -> np.ndarray:
+        """``reuse``: try CG with a cached LU even when many entries changed (small changes of
+        many coefficients, such as a transmissivity update)."""
+        cached = [(A, lu) for A, lu in self.cache if A.shape == M.shape]
+        if not cached:
+            return self._factor(M).solve(b)
+        diffs = [M - A for A, _ in cached]
+        best = int(np.argmin([abs(d).sum() for d in diffs]))
+        lu, changed = cached[best][1], diffs[best].count_nonzero()
         if changed == 0:
-            return self.lu.solve(b)
-        if changed > max(PCG_MAX_CHANGED, PCG_MAX_CHANGED_FRACTION * M.shape[0]):
-            self._factor(M)
-            return self.lu.solve(b)
-        P = LinearOperator(M.shape, matvec=self.lu.solve, dtype=float)
-        x, info = cg(M, b, x0=x0, M=P, rtol=PCG_RTOL, atol=0.0, maxiter=PCG_MAXITER)
+            return lu.solve(b)
+        if not reuse and changed > max(PCG_MAX_CHANGED, PCG_MAX_CHANGED_FRACTION * M.shape[0]):
+            return self._factor(M).solve(b)
+        P = LinearOperator(M.shape, matvec=lu.solve, dtype=float)
+        maxiter = PCG_MAXITER_REUSE if reuse else PCG_MAXITER
+        x, info = cg(M, b, x0=x0, M=P, rtol=PCG_RTOL, atol=0.0, maxiter=maxiter)
         if info == 0:
             return x
-        self._factor(M)
-        return self.lu.solve(b)
+        return self._factor(M).solve(b)
 
 
 @dataclass(frozen=True)
@@ -87,6 +99,31 @@ class FluxBoundary:
 
 
 @dataclass(frozen=True)
+class Convertible:
+    """Layer whose transmissivity follows the saturated thickness (MODFLOW 6 convertible):
+    T = k (min(h, top) - bottom), at least ``MIN_SATURATED_FRACTION`` of the thickness.
+    k [m/d], top and bottom [m]: numbers or (nrow, ncol) arrays."""
+
+    k: np.ndarray | float
+    top: np.ndarray | float
+    bottom: np.ndarray | float
+
+    def _wet(self, h: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        D = np.asarray(self.top) - np.asarray(self.bottom)
+        return np.minimum(h, self.top) - self.bottom, D
+
+    def saturated(self, h: np.ndarray) -> np.ndarray:
+        """Saturated thickness [m] at head ``h``."""
+        wet, D = self._wet(h)
+        return np.clip(wet, MIN_SATURATED_FRACTION * D, D)
+
+    def dry(self, h: np.ndarray) -> np.ndarray:
+        """Cells held at the minimum saturated thickness."""
+        wet, D = self._wet(h)
+        return wet <= MIN_SATURATED_FRACTION * D
+
+
+@dataclass(frozen=True)
 class GridSolution:
     heads: np.ndarray  # (n_layers, nrow, ncol)
     fluxes: dict[str, float]  # per boundary group [m3/d], positive = into the groundwater
@@ -97,6 +134,8 @@ class GridSolution:
     mass_balance_error: float
     active: dict[str, np.ndarray]  # per group: head-dependent state per entry
     flux_response: np.ndarray | None  # head change by the fixed fluxes alone (frozen states)
+    transmissivity: np.ndarray  # (n_layers, nrow, ncol) [m2/d] of the final solve
+    dry: np.ndarray  # (n_layers, nrow, ncol): convertible cells at the minimum thickness
 
 
 def _harmonic(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -118,6 +157,7 @@ def solve_grid(
     max_iter: int = 60,
     initial_active: dict[str, np.ndarray] | None = None,
     factorization: Factorization | None = None,
+    convertible: Sequence[Convertible | None] = (),
 ) -> GridSolution:
     """``T`` per layer and ``c`` between layers: a number, or an (nrow, ncol) array for a
     subsoil that varies per cell.
@@ -126,38 +166,45 @@ def solve_grid(
     (None = closed for that layer), or None (closed model).
 
     ``initial_active``: starting state per group (default: all on), e.g. the final states
-    of a previous run. ``factorization``: shared LU cache, only for runs on the same grid."""
+    of a previous run. ``factorization``: shared LU cache, only for runs on the same grid.
+    ``convertible``: per layer a :class:`Convertible` or None (fixed); for a convertible
+    layer ``T`` is only the starting value."""
     factorization = factorization or Factorization()
     nl = len(T)
     n = nl * nrow * ncol
     idx = np.arange(n).reshape(nl, nrow, ncol)
     area = cell * cell
 
-    rows, cols, vals = [], [], []
-    diag = np.zeros(n)
-
-    def link(a: np.ndarray, b: np.ndarray, cond: float | np.ndarray) -> None:
-        cond = np.broadcast_to(cond, a.shape).ravel()
-        a, b = a.ravel(), b.ravel()
-        rows.extend([a, b])
-        cols.extend([b, a])
-        vals.extend([-cond, -cond])
-        np.add.at(diag, a, cond)
-        np.add.at(diag, b, cond)
-
     shape = (nrow, ncol)
-    for layer, t_in in enumerate(T):  # square cells: T dy/dx = T; harmonic mean between cells
-        t = np.broadcast_to(np.asarray(t_in, dtype=float), shape)
-        link(idx[layer, :, :-1], idx[layer, :, 1:], _harmonic(t[:, :-1], t[:, 1:]))
-        link(idx[layer, :-1, :], idx[layer, 1:, :], _harmonic(t[:-1, :], t[1:, :]))
-    for layer, ci in enumerate(c):
-        link(idx[layer], idx[layer + 1], area / np.broadcast_to(np.asarray(ci, float), shape))
-    base = sp.csr_matrix(
-        (np.concatenate(vals) if vals else np.empty(0),
-         (np.concatenate(rows) if rows else np.empty(0, int),
-          np.concatenate(cols) if cols else np.empty(0, int))),
-        shape=(n, n),
-    ) + sp.diags(diag)  # fmt: skip
+    conv = list(convertible) + [None] * (nl - len(convertible))
+    t_cur = np.array([np.broadcast_to(np.asarray(t, dtype=float), shape) for t in T])
+
+    def build_base(t_layers: np.ndarray) -> sp.csr_matrix:
+        rows, cols, vals = [], [], []
+        diag = np.zeros(n)
+
+        def link(a: np.ndarray, b: np.ndarray, cond: float | np.ndarray) -> None:
+            cond = np.broadcast_to(cond, a.shape).ravel()
+            a, b = a.ravel(), b.ravel()
+            rows.extend([a, b])
+            cols.extend([b, a])
+            vals.extend([-cond, -cond])
+            np.add.at(diag, a, cond)
+            np.add.at(diag, b, cond)
+
+        for layer, t in enumerate(t_layers):  # square cells: T dy/dx = T; harmonic mean
+            link(idx[layer, :, :-1], idx[layer, :, 1:], _harmonic(t[:, :-1], t[:, 1:]))
+            link(idx[layer, :-1, :], idx[layer, 1:, :], _harmonic(t[:-1, :], t[1:, :]))
+        for layer, ci in enumerate(c):
+            link(idx[layer], idx[layer + 1], area / np.broadcast_to(np.asarray(ci, float), shape))
+        return sp.csr_matrix(
+            (np.concatenate(vals) if vals else np.empty(0),
+             (np.concatenate(rows) if rows else np.empty(0, int),
+              np.concatenate(cols) if cols else np.empty(0, int))),
+            shape=(n, n),
+        ) + sp.diags(diag)  # fmt: skip
+
+    base = build_base(t_cur)
     rhs_fixed_flux = np.zeros(n)
     for f in fluxes:
         np.add.at(rhs_fixed_flux, f.keys, f.rate)
@@ -209,7 +256,7 @@ def solve_grid(
         Mf = M[free][:, free].tocsc()
         b_free = rhs[free] - (M[free][:, fix] @ h[fix] if fix.size else 0.0)
         x0 = h_prev[free] if np.all(np.isfinite(h_prev[free])) else None
-        h[free] = factorization.solve(Mf, b_free, x0)
+        h[free] = factorization.solve(Mf, b_free, x0, reuse=any(conv))
 
         changed = False
         for b in boundaries:
@@ -221,9 +268,20 @@ def solve_grid(
             if not np.array_equal(new, active[b.name]):
                 changed = True
             active[b.name] = new
+        layers = [i for i, cv in enumerate(conv) if cv is not None]
+        if layers:
+            heads, prev = h.reshape(nl, nrow, ncol), h_prev.reshape(nl, nrow, ncol)
+            if not np.all(np.isfinite(prev[layers])) or (
+                np.max(np.abs(heads[layers] - prev[layers])) > HEAD_TOL
+            ):
+                changed = True
         if not changed:
             converged = True
             break
+        if layers:  # new transmissivities for the next solve
+            for i in layers:
+                t_cur[i] = np.asarray(conv[i].k) * conv[i].saturated(heads[i])
+            base = build_base(t_cur)
 
     flux_out = {}
     for b in boundaries:
@@ -260,6 +318,13 @@ def solve_grid(
         mass_balance_error=float(error),
         active=active,
         flux_response=response,
+        transmissivity=t_cur,
+        dry=np.array(
+            [
+                np.zeros(shape, dtype=bool) if cv is None else np.broadcast_to(cv.dry(hl), shape)
+                for cv, hl in zip(conv, h.reshape(nl, nrow, ncol), strict=True)
+            ]
+        ),
     )
 
 

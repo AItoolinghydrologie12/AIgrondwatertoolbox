@@ -43,7 +43,7 @@ def test_parabola_between_two_ideal_ditches() -> None:
     )  # fmt: skip
     par = dataclasses.replace(
         BASE, stack=ONE_LAYER, size_x=500.0, size_y=100.0, recharge=N, surface=2.0,
-        boundary="gesloten", watercourses=ditches,
+        boundary="gesloten", watercourses=ditches, convertible=False,
     )  # fmt: skip
     res = p3.compute(par)
     x0, x1 = res.x[0], res.x[-1]
@@ -131,7 +131,7 @@ def _strip_case(cell: float, correction: bool) -> tuple[float, float]:
         BASE, stack=TWO_LAYER, size_x=size_x, size_y=size_y, cell=cell, recharge=0.0,
         surface=0.0, boundary="gesloten", watercourses=wcs,
         drain_cells=tuple((r, c) for r in range(nrow) for c in range(ncol)),
-        drain_depth=1.0, drain_resistance=w, grid_correction=correction,
+        drain_depth=1.0, drain_resistance=w, grid_correction=correction, convertible=False,
     )  # fmt: skip
     res = p3.compute(par)
     q_num = (

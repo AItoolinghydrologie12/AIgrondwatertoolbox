@@ -109,7 +109,7 @@ de app onder **Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`)
 | Lagen | één rekenlaag per watervoerend pakket; scheidende lagen als weerstand c (quasi-3D) | scheidende lagen zijn gewone modellagen met lage K33 |
 | Horizontale geleiding | T = kh·D, harmonisch gemiddelde tussen cellen | idem (NPF, vaste T) |
 | Verticale geleiding | A / (½D₁/kv₁ + c + ½D₂/kv₂) | idem bij één laag per pakket en de klei als eigen laag |
-| Transmissiviteit | vast (lineair, "confined") | optioneel variabel met droogvallen (Newton) |
+| Transmissiviteit | standaard kh × natte dikte, droge cellen op 1 % van D (uit te zetten: vast) | idem met "convertible" lagen en Newton |
 | Neerslag | vast neerslagoverschot op de bovenste laag | RCH |
 | Watergangen | RIV of DRN: q = C(h_peil − h), RIV begrensd op de bodem | RIV / DRN, zelfde formules |
 | Conductance watergang | **berekend door de app**: natte omtrek per laag, intreeweerstand, radiale weerstand (Ernst), strookweerstand bij een bodem in klei, celgrootte-correctie (De Lange) | moet de gebruiker zelf opgeven |
@@ -125,15 +125,17 @@ de app onder **Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`)
 - Geen stroming *langs* scheidende lagen en geen verticale stroming binnen een pakket buiten
   de ½D/kv-term: elk pakket is één laag (Dupuit). Bij partieel doordringende watergangen
   vangt de radiale weerstand dat op.
-- **Vaste transmissiviteit.** T = kh · D rekent met de ingevoerde laagdikte D, ook voor het
-  freatische pakket. In werkelijkheid voert daar alleen het verzadigde deel water
-  (grondwaterstand − onderkant laag): stijgt de grondwaterstand, dan wordt T groter; daalt
-  hij, dan kleiner, tot droogvallen toe. MODFLOW 6 kan dat met een "convertible" laag
-  (ICELLTYPE, T = k · (h − bodem), Newton-methode). Gevolgen:
-  - **peilopzet**: meestal klein, bv. 0,2 m verhoging op 5 m freatisch pakket ≈ 4 % meer T;
-  - **deklaag als bovenkant**: verwaarloosbaar, de T van de klei is al heel klein;
-  - **putten in de freatische laag**: de werkelijke verlaging is groter dan berekend; bij een
-    verlaging van meer dan 25 % van de laagdikte waarschuwt de app.
+- **Transmissiviteit volgt de natte dikte** (standaard aan, zoals een MODFLOW 6
+  "convertible" laag): T = kh × (grondwaterstand of bovenkant − onderkant laag). Dat geldt
+  voor het freatisch zandpakket en voor elk pakket waarvan de stijghoogte onder de bovenkant
+  zakt (de app meldt dat). Een cel die droogvalt rekent door met 1 % van de laagdikte, zoals
+  de Newton-methode van MODFLOW 6; de kaart toont daar de onderkant van de laag. Een deklaag
+  van klei houdt een vaste T (die is al heel klein). Verschil met MODFLOW 6: de verticale
+  weerstand blijft op de volle dikte (MF6 zonder VARIABLECV, de standaard) en tussen cellen
+  geldt het harmonisch gemiddelde zonder upstream-weging. Uitgezet (zijbalk *Beoordeling en
+  numeriek*) rekent de app met vaste T = kh · D. Effect: bij peilopzet klein (0,2 m op 5 m
+  freatisch pakket ≈ 4 % meer T); bij putten in een freatisch pakket wordt de verlaging
+  groter dan met vaste T.
 - De uitwisseling met watergangen rekent de app zelf uit (Ernst/De Lange). In MODFLOW hangt
   dit helemaal af van wat de modelleur als conductance invult.
 
@@ -159,7 +161,7 @@ de app onder **Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`)
 
 **Algemeen**
 - Alleen stationair.
-- Lineaire schematisering: de verzadigde dikte van de freatische laag verandert niet.
+- De transmissiviteit volgt de natte dikte (uit te zetten); de verticale weerstand niet.
 - De uitwisseling van een watergang volgt C' = 1/(c/u + R_rad), met de radiale weerstand
   R_rad = ln(aD/u')/(π√(kh·kv)), a = √(kh/kv) (Ernst, anisotroop). Dit geldt voor een
   natte omtrek die klein is ten opzichte van de laagdikte.
@@ -183,7 +185,9 @@ de app onder **Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`)
   geïnterpoleerd tussen celmiddens; pieken tussen twee celmiddens worden dus afgevlakt.
 - Rekentijd: het grootste rooster (100 × 100 cellen × 2 lagen) ca. 0,2 s per
   berekening (referentie + opzet); op een gedeelde cloudserver langer.
-- Transmissiviteit vast (lineair); maximaal 4 pakketten.
+- Maximaal 4 pakketten. Met meebewegende transmissiviteit kost een model met veel
+  droogvallende cellen rond putten meer rekentijd (lokaal tot ca. 4–5 s bij 100 × 100 cellen
+  en 4 pakketten; zonder droogval ca. 1,5 s).
 - **Anisotropie** kv/kh per pakket (standaard 0,33): de weerstand tussen pakketten is
   c + D₁/(2kv₁) + D₂/(2kv₂), zoals MODFLOW 6 met één laag per pakket. Ook de radiale
   weerstand van watergangen rekent met kv/kh (Ernst met opgerekte verticale maten).

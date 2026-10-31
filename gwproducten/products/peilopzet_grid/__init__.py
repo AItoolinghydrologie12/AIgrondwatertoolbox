@@ -12,6 +12,8 @@ import pandas as pd
 from gwproducten.core.layers import TOP_MODE_LABEL, LayerStack, build_layers
 from gwproducten.core.params import ParamError, param, range_errors
 from gwproducten.numeric.grid2d import (
+    MIN_SATURATED_FRACTION,
+    Convertible,
     Factorization,
     FluxBoundary,
     HeadBoundary,
@@ -155,6 +157,7 @@ class Params:
     seepage_resistance: float = param(1000.0, "d", "Weerstand c naar diep pakket", 1.0, 1e6)
     threshold: float = param(0.05, "m", "Grens verhoging", 0.001, 1.0)
     grid_correction: bool = True
+    convertible: bool = True  # T follows the saturated thickness (MODFLOW 6 convertible)
 
     @property
     def nrow(self) -> int:
@@ -311,6 +314,36 @@ def _node_fields(params: Params) -> tuple[list[np.ndarray], list[np.ndarray]]:
     T = [np.array([s.nodes[j].T for s in stacks])[zmap] for j in range(nl)]
     c = [np.array([s.node_resistances()[j] for s in stacks])[zmap] for j in range(nl - 1)]
     return T, c
+
+
+def layer_geometry(params: Params) -> list[tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    """(k_h, top, bottom) per cell [m/d, m NAP] for the layer of every node."""
+    zmap = zone_map(params)
+    out = []
+    for node in params.stack.nodes:
+        k, top, bottom = (
+            np.array(v)[zmap]
+            for v in zip(
+                *(
+                    (s.layers[node.layer].k_h, z + s.z_top[node.layer], z + s.z_bottom[node.layer])
+                    for s, z in columns(params)
+                ),
+                strict=True,
+            )
+        )
+        out.append((k, top, bottom))
+    return out
+
+
+def _convertible(params: Params) -> list[Convertible | None]:
+    """Convertible aquifer nodes (not a clay top layer); empty when switched off."""
+    if not params.convertible:
+        return []
+    clay_top = params.stack.top_mode == "deklaag"
+    return [
+        None if (j == 0 and clay_top) else Convertible(k, top, bottom)
+        for j, (k, top, bottom) in enumerate(layer_geometry(params))
+    ]
 
 
 def as_ditch(params: Params, wc: Watercourse, surface: float | None = None) -> Ditch:
@@ -485,18 +518,25 @@ def compute(params: Params) -> Result:
     zmap = zone_map(params)
     cond = _cell_conductances(params, sub)
     fixed = _fixed_head(params)
+    convertible = _convertible(params)
 
     # Both runs share the grid matrix; the opzet run starts from the reference states.
     sols = {}
     factorization = Factorization()
-    for run in ("ref", "new"):
-        sols[run] = solve_grid(
-            T, c, params.nrow, params.ncol, params.cell, params.recharge,
+
+    def solve_run(run: str, with_wells: bool = True, start=None):
+        """``start``: earlier run whose states (and transmissivities) are the first guess."""
+        return solve_grid(
+            T if start is None else list(start.transmissivity),
+            c, params.nrow, params.ncol, params.cell, params.recharge,
             _boundaries(params, sub, run, cond), fixed_head=fixed,
-            fluxes=_wells(params, sub, run),
-            initial_active=sols["ref"].active if run == "new" else None,
-            factorization=factorization,
+            fluxes=_wells(params, sub, run) if with_wells else (),
+            initial_active=None if start is None else start.active,
+            factorization=factorization, convertible=convertible,
         )  # fmt: skip
+
+    sols["ref"] = solve_run("ref")
+    sols["new"] = solve_run("new", start=sols["ref"])
     ref, new = sols["ref"], sols["new"]
 
     rows = [
@@ -587,9 +627,49 @@ def compute(params: Params) -> Result:
             "cellen extra boven maaiveld (maaivelddrainage actief)."
         )
 
+    geometry = layer_geometry(params)
+
+    def shown(sol) -> np.ndarray:
+        """Heads for display: a dry cell (minimum saturated thickness) at its layer bottom,
+        as MODFLOW 6 marks it dry; its computed head lies below the bottom."""
+        h = sol.heads.copy()
+        for j, cv in enumerate(convertible):
+            if cv is not None:
+                h[j] = np.where(sol.dry[j], geometry[j][2], h[j])
+        return h
+
+    heads_ref, heads_new = shown(ref), shown(new)
     well_drawdown = None
-    if new.flux_response is not None:
-        well_drawdown = -new.flux_response  # drawdown positive
+    if new.flux_response is not None and any(cv is not None for cv in convertible):
+        # nonlinear: drawdown = difference with the same run without the wells
+        well_drawdown = shown(solve_run("new", with_wells=False, start=ref)) - heads_new
+    elif new.flux_response is not None:
+        well_drawdown = -new.flux_response  # linear: exact response, drawdown positive
+    for j, node in enumerate(nodes):
+        if j < len(convertible) and convertible[j] is not None:
+            n_dry = int(np.maximum(ref.dry[j], new.dry[j]).sum())
+            if n_dry:
+                warnings.append(
+                    f"{node.label}: in {n_dry} cellen valt de laag (bijna) droog. Daar rekent het "
+                    f"model met een minimale natte dikte ({MIN_SATURATED_FRACTION:.0%} van de "
+                    "laagdikte), zoals MODFLOW 6 (Newton). Kaarten tonen daar de onderkant van "
+                    "de laag als stijghoogte (droog)."
+                )
+        if j == 0:  # phreatic layer or clay top: no confined top
+            continue
+        top = geometry[j][1]
+        n_unconf = int(np.maximum(ref.heads[j] < top, new.heads[j] < top).sum())
+        if n_unconf:
+            how = (
+                "de transmissiviteit rekent daar met de natte dikte"
+                if params.convertible
+                else "de transmissiviteit blijft in het model vast"
+            )
+            warnings.append(
+                f"{node.label}: in {n_unconf} cellen zakt de stijghoogte onder de bovenkant "
+                f"van het pakket (plaatselijk freatisch); {how}."
+            )
+    if well_drawdown is not None and not params.convertible:
         for g in params.wells:
             if g.layer != nodes[0].key or g.q_new <= 0:
                 continue
@@ -612,9 +692,9 @@ def compute(params: Params) -> Result:
     return Result(
         x=x,
         y=y,
-        heads_ref=ref.heads,
-        heads_new=new.heads,
-        rise=new.heads - ref.heads,
+        heads_ref=heads_ref,
+        heads_new=heads_new,
+        rise=heads_new - heads_ref,
         budget=budget,
         mass_balance={"referentie": ref.mass_balance_error, "opzet": new.mass_balance_error},
         iterations={"referentie": ref.iterations, "opzet": new.iterations},
@@ -631,9 +711,9 @@ def compute(params: Params) -> Result:
 
 def strip_benchmark(stack: LayerStack, cell: float, correction: bool) -> tuple[float, float]:
     """Benchmark against the 1D analytic peilopzet: long parallel ditches (full columns),
-    closed boundary, pipe drainage at the polder level everywhere (w = 100 d), no recharge,
-    so the model stays linear. Returns (numerical, analytic) infiltration of the raised
-    ditch [m2/d per m]."""
+    closed boundary, pipe drainage at the polder level everywhere (w = 100 d), no recharge
+    and fixed transmissivity, so the model stays linear. Returns (numerical, analytic)
+    infiltration of the raised ditch [m2/d per m]."""
     from gwproducten.analytic.multilayer import LayerSystem, LineElement, solve
 
     nrow = max(4, int(np.ceil(50.0 / cell)))
@@ -654,7 +734,7 @@ def strip_benchmark(stack: LayerStack, cell: float, correction: bool) -> tuple[f
         stack=stack, surface=0.0, recharge=0.0, size_x=size_x, size_y=size_y, cell=cell,
         boundary="gesloten", watercourses=wcs,
         drain_cells=tuple((r, c) for r in range(nrow) for c in range(ncol)),
-        drain_depth=1.0, drain_resistance=w, grid_correction=correction,
+        drain_depth=1.0, drain_resistance=w, grid_correction=correction, convertible=False,
     )  # fmt: skip
     res = compute(par)
     q_num = (

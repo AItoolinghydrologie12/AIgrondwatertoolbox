@@ -24,10 +24,11 @@ def column(col: int, nrow: int) -> tuple[tuple[int, int], ...]:
 
 
 def bare(**kw) -> p3.Params:
-    """Model without watercourses, high surface (surface drainage stays inactive)."""
+    """Model without watercourses, high surface (surface drainage stays inactive), fixed
+    transmissivity (linear benchmarks)."""
     base = dict(
         stack=ONE_LAYER, surface=20.0, recharge=0.0, size_x=1000.0, size_y=1000.0, cell=25.0,
-        boundary="gesloten", watercourses=(),
+        boundary="gesloten", watercourses=(), convertible=False,
     )  # fmt: skip
     base.update(kw)
     return p3.Params(**base)
@@ -129,10 +130,26 @@ def test_well_drawdown_map_is_superposition_with_nonlinear_boundaries() -> None:
 
 
 def test_well_in_phreatic_layer_warns_on_large_drawdown() -> None:
+    """Fixed T: warning on drawdown > 25 % of the thickness. Convertible: the cells around
+    the well fall dry and the model says so."""
     wells = (p3.WellGroup("put", ((20, 20),), "freatisch", 3000.0, 3000.0),)
     par = dataclasses.replace(p3.Params(), wells=wells)
-    res = p3.compute(par)
-    assert any("put" in w and "freatisch" in w.lower() for w in res.warnings)
+    fixed = p3.compute(dataclasses.replace(par, convertible=False))
+    assert any("put" in w and "freatisch" in w.lower() for w in fixed.warnings)
+    conv = p3.compute(par)
+    assert any("Freatisch pakket" in w and "droog" in w for w in conv.warnings)
+    # the dry well cell is shown at the layer bottom: drawdown at most the wet thickness
+    assert 0 < conv.well_drawdown[0, 20, 20] <= par.stack.layers[0].thickness
+
+
+def test_confined_aquifer_below_its_top_is_reported() -> None:
+    """A large well in pakket 1 under a clay top lowers the head below the top of the
+    aquifer: it becomes locally phreatic."""
+    clay = LayerStack("deklaag", build_layers("deklaag", [(20.0, 15.0)], [(2.0, 500.0, 0.02)]))
+    wells = (p3.WellGroup("put", ((20, 20),), "pakket1", 0.0, 8000.0),)
+    res = p3.compute(dataclasses.replace(p3.Params(), stack=clay, wells=wells))
+    assert any("Pakket 1" in w and "plaatselijk freatisch" in w for w in res.warnings)
+    assert max(res.mass_balance.values()) < 1e-6
 
 
 def test_boundary_per_layer_equal_heads_equals_fixed() -> None:

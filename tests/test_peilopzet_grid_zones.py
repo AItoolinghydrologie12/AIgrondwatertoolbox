@@ -84,6 +84,7 @@ def test_harmonic_mean_between_zones_is_exact() -> None:
             p3.GhbGroup("oost", column(ncol - 1, range(nrow)), "freatisch", h_e, h_e, c_g),
         ),
         zones=(p3.Zone("westhelft", block(range(nrow), range(ncol // 2)), zone_stack, 50.0),),
+        convertible=False,
     )  # fmt: skip
     res = p3.compute(par)
     L1 = L2 = (ncol // 2 - 0.5) * cell
