@@ -181,7 +181,18 @@ correctie +3 % (freatisch zand) tot +54 % (deklaag met 4 pakketten).
 $Q$ [m³/d], apart voor referentie en opzet. Positief $Q$ = onttrekking (verlaging), negatief
 = infiltratie. In de balans van de cel staat $-Q$. Een put zit, net als in MODFLOW, verdeeld
 over de hele cel: de berekende celstijghoogte is een celgemiddelde en dus minder diep dan de
-stijghoogte in de put zelf (die volgt bij benadering uit Thiem/Peaceman, niet uit dit model).
+stijghoogte in de put zelf. Die rekent de app achteraf uit met de correctie van Peaceman
+(1978), zoals het MAW-pakket van MODFLOW 6:
+
+$$
+h_\text{put} = h_\text{cel} - \frac{Q}{2\pi T}\,\ln\frac{r_e}{r_w} ,\qquad r_e = 0{,}198\,\Delta x ,
+$$
+
+met $r_w$ de putstraal en $T$ van de cel (bij meebewegende $T$ de actuele). Vergeleken met De
+Glee op $r = r_w$ (lekkend pakket, $\lambda$ = 100 m) is de afwijking 0,1–0,9 % bij cellen van
+10 tot 50 m, terwijl het celgemiddelde 40–65 % minder verlaging geeft. Een putweerstand
+(skin) en partiële filterlengte zitten er niet in. Ligt de putstijghoogte onder de onderkant
+van de laag, dan meldt de app dat het debiet niet haalbaar is.
 
 De **verlaging door de putten** toont de app apart. Met vaste $T$ is het model lineair bij
 vaste toestanden van RIV/DRN: de verlaging is dan de oplossing van hetzelfde stelsel met

@@ -200,10 +200,11 @@ def props_form(prefix: str, cell: float, surface: float) -> dict[str, Any]:
     return props
 
 
+DEFAULT_RADIUS = p3.WellGroup().radius  # also for well groups from older projects
 GROUP_COLUMNS = {
     "wells": {
         "name": "Naam", "layer": "Laag", "q_ref": "Q per put ref [m³/d]",
-        "q_new": "Q per put opzet [m³/d]",
+        "q_new": "Q per put opzet [m³/d]", "radius": "Putstraal [m]",
     },
     "ghb": {
         "name": "Naam", "layer": "Laag", "head_ref": "h ref [m NAP]",
@@ -235,6 +236,12 @@ def group_form(action: str, labels: dict[str, str]) -> dict[str, Any]:
         props["q_new"] = c2.number_input(
             "Q per put opzet [m³/d]", value=100.0, step=10.0, key=f"{k}_qn"
         )
+        props["radius"] = st.number_input(
+            "Putstraal [m]", value=DEFAULT_RADIUS, min_value=0.01, max_value=2.0, step=0.05,
+            key=f"{k}_rw",
+            help="Alleen voor de stijghoogte in de put zelf (Peaceman); de kaart toont het "
+            "celgemiddelde.",
+        )  # fmt: skip
     else:
         props["head_ref"] = c1.number_input(
             "h ref [m NAP]", value=values["surface"] - 1.2, step=0.05, key=f"{k}_hr"
@@ -261,7 +268,12 @@ def group_tables(labels: dict[str, str]) -> None:
         table = pd.DataFrame(
             [
                 {
-                    **{cols[f]: labels.get(g[f], g[f]) if f == "layer" else g[f] for f in cols},
+                    **{
+                        cols[f]: labels.get(g[f], g[f])
+                        if f == "layer"
+                        else g.get(f, DEFAULT_RADIUS)
+                        for f in cols
+                    },
                     "Cellen": len(g["points"]),
                     "Verwijderen": False,
                 }
@@ -467,7 +479,10 @@ def build_params(wcs_view: list[dict[str, Any]], drain_cells: tuple) -> p3.Param
             p3.Zone(z["name"], z["cells"], *zone_values[z["id"]]) for z in zone_groups()
         ),
         wells=tuple(
-            p3.WellGroup(g["name"], g["cells"], g["layer"], g["q_ref"], g["q_new"])
+            p3.WellGroup(
+                g["name"], g["cells"], g["layer"], g["q_ref"], g["q_new"],
+                g.get("radius", DEFAULT_RADIUS),
+            )  # fmt: skip
             for g in groups("wells")
         ),
         ghb=tuple(
@@ -923,6 +938,14 @@ def show_result(
         )
         st.markdown("**Conductance per cel** (gemiddeld over de cellen van de watergang)")
         st.dataframe(res.conductances.round(3), hide_index=True)
+    if res.wells is not None:
+        with st.expander("Putten: verlaging in de put", expanded=view == "putten"):
+            st.dataframe(res.wells.round(2), hide_index=True)
+            st.caption(
+                "De kaart toont het celgemiddelde. De stijghoogte in de put volgt uit de "
+                "Peaceman-correctie −Q/(2πT)·ln(0,198·Δx/r_w), met de putstraal r_w en T van "
+                "de cel; 'Droog': de cel valt droog, dan is de putstijghoogte niet bepaald."
+            )
     return fig_res, fig_prof, prof
 
 
@@ -981,6 +1004,8 @@ def show_export(
     csv_button(
         res.budget.reset_index(names="post"), "peilopzet2d_waterbalans.csv", "Waterbalans (CSV)"
     )
+    if res.wells is not None:
+        csv_button(res.wells, "peilopzet2d_putten.csv", "Putten (CSV)")
     cells = pd.DataFrame(
         [
             {"watergang": wc["name"], "rij": r, "kolom": c, "lengte [m]": length}
