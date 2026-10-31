@@ -14,6 +14,7 @@ from gwproducten.products import peilopzet_grid as p3
 
 KEY = "p3"  # the model of the Grondwatertoolbox page
 MAP_CONFIG = {"scrollZoom": True, "displaylogo": False}
+MAP_THRESHOLD = 1e-4  # [m] smaller head differences are rounding noise: no map
 
 st.set_page_config(page_title="Rekenkern MODFLOW 6", layout="wide")
 st.title("Rekenkern: eigen solver en MODFLOW 6")
@@ -96,6 +97,15 @@ with uitleg:
         "post, de puttabel en de meldingen zijn gelijk."
     )
     st.dataframe(TESTS, hide_index=True, width="stretch")
+    st.subheader("Herkomst en gebruiksrecht")
+    st.markdown(
+        "**MODFLOW 6** (U.S. Geological Survey) en **flopy** zijn open source en vallen in het "
+        "publieke domein: vrij te gebruiken, ook beroepsmatig, zonder licentiekosten. "
+        "Bronnen: Langevin, C.D. e.a. (2017), *Documentation for the MODFLOW 6 Groundwater "
+        "Flow Model*, USGS Techniques and Methods 6-A55; Bakker, M. e.a. (2016), *Scripting "
+        "MODFLOW model development using Python and FloPy*, Groundwater 54(5). De "
+        "Grondwatertoolbox is geen product van en niet goedgekeurd door de USGS."
+    )
     st.subheader("Hoe zeg je het tegen collega's")
     st.info(
         "*Het grondwatermodel kan met MODFLOW 6 (USGS) rekenen; standaard rekent een eigen "
@@ -172,26 +182,30 @@ with vergelijk:
         width="stretch",
     )
 
-    c1, c2 = st.columns(2)
-    which = c1.radio("Situatie", ["opzet", "referentie"], horizontal=True, key=f"{KEY}_cmp_sit")
-    layer = c2.selectbox("Laag", range(len(labels)), format_func=labels.__getitem__,
-                         key=f"{KEY}_cmp_layer")  # fmt: skip
-    z = (d_new if which == "opzet" else d_ref)[layer]
-    fig = result_figure(
-        own.x,
-        own.y,
-        z,
-        params.cell,
-        done["wcs"],
-        label="h_MF6 − h_eigen [m]",
-        diverging=True,
-        wells=[{"name": g.name, "cells": g.cells} for g in params.wells],
-        min_span=0.01,
-    )
-    st.plotly_chart(fig, width="stretch", config=MAP_CONFIG, key=f"{KEY}_cmp_map")
-    st.caption("Blauw = MODFLOW 6 hoger, rood = lager dan de eigen solver. De kleurschaal loopt "
-               "minimaal van −1 tot +1 cm: een witte kaart betekent verschillen van hooguit "
-               "enkele millimeters (hier meestal alleen rekenruis).")  # fmt: skip
+    largest = max(np.abs(d_new).max(), np.abs(d_ref).max())
+    if largest < MAP_THRESHOLD:
+        st.success(
+            f"Het verschil is overal kleiner dan {MAP_THRESHOLD * 1000:.1f} mm (grootste "
+            f"verschil {largest * 1000:.1e} mm): beide rekenkernen geven hetzelfde resultaat. "
+            "Een verschilkaart zou alleen rekenruis tonen (afronding achter de komma)."
+        )
+    else:
+        c1, c2 = st.columns(2)
+        which = c1.radio("Situatie", ["opzet", "referentie"], horizontal=True,
+                         key=f"{KEY}_cmp_sit")  # fmt: skip
+        layer = c2.selectbox("Laag", range(len(labels)), format_func=labels.__getitem__,
+                             key=f"{KEY}_cmp_layer")  # fmt: skip
+        z = (d_new if which == "opzet" else d_ref)[layer]
+        z = np.where(np.abs(z) < MAP_THRESHOLD, 0.0, z)  # noise below 0.1 mm shown as zero
+        fig = result_figure(
+            own.x, own.y, z, params.cell, done["wcs"], label="h_MF6 − h_eigen [m]",
+            diverging=True, wells=[{"name": g.name, "cells": g.cells} for g in params.wells],
+            min_span=0.01,
+        )  # fmt: skip
+        st.plotly_chart(fig, width="stretch", config=MAP_CONFIG, key=f"{KEY}_cmp_map")
+        st.caption("Blauw = MODFLOW 6 hoger, rood = lager dan de eigen solver. Verschillen "
+                   "kleiner dan 0,1 mm zijn als nul getekend (rekenruis); de kleurschaal loopt "
+                   "minimaal van −1 tot +1 cm.")  # fmt: skip
 
     st.markdown("**Waterbalans na opzet [m³/d]**")
     budget = pd.DataFrame(

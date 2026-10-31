@@ -372,5 +372,17 @@ def test_engine_comparison_page() -> None:
     at.button(key="p3_cmp").click().run()
     assert not at.exception, [e.value for e in at.exception]
     assert float(at.metric[0].value.split()[0]) < 1e-5  # max head difference [m]
+    # equal results: a message instead of a map of rounding noise
+    assert any("hetzelfde resultaat" in s.value for s in at.success)
+    assert not [r for r in at.radio if r.key == "p3_cmp_sit"]
+
+    # drying cells around a well: MF6 needs Newton, the results differ and the map is shown
+    wells = (p3.WellGroup("bem", ((20, 20), (20, 21)), "freatisch", 0.0, 30.0),)
+    par = p3.Params(wells=wells)
+    at.session_state["p3_result"] = {"params": par, "res": p3.compute(par), "wcs": []}
+    at.run()
+    at.button(key="p3_cmp").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("droog" in w.value for w in at.warning)
     at.radio(key="p3_cmp_sit").set_value("referentie").run()
     assert not at.exception, [e.value for e in at.exception]
