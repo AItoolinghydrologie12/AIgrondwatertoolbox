@@ -24,8 +24,8 @@ k_v = (k_v/k_h)\cdot k_h ,
 $$
 
   met standaard $k_v/k_h$ = 0,33 per pakket. Een deklaag als bovenkant heeft geen halve term:
-  zijn volle $c$ ligt tussen grondwaterstand en pakket 1. De radiale weerstand van
-  watergangen rekent met $k_h$ (isotroop).
+  zijn volle $c$ ligt tussen grondwaterstand en pakket 1. Ook de radiale weerstand van
+  watergangen rekent met de anisotropie (zie *Conductance per cel*).
 - **Neerslagoverschot** $N$ [m/d] op de freatische knoop van elke cel.
 - **Modelrand**: vaste stijghoogte in de buitenste ring cellen (alle lagen), gesloten (geen
   stroming), of **per laag** een vaste stijghoogte of gesloten.
@@ -93,7 +93,23 @@ C'_i = \frac{1}{c_\text{wg}/u_i + R_{\text{rad},i}} \quad [\text{m/d per m}],
 $$
 
 met $L$ de lengte van de watergang in de cel. De waterdiepte volgt uit referentiepeil −
-bodemhoogte. Je kunt ook zelf een conductance per cel opgeven; die wordt dan in dezelfde
+bodemhoogte.
+
+**Radiale weerstand met anisotropie (Ernst).** Alleen in het pakket met de bodem stroomt het
+water met een trechter naar de watergang. Rek de verticale maten op met
+$a = \sqrt{k_h/k_v}$; dan is het pakket isotroop met $k' = \sqrt{k_h k_v}$, dikte $aD$ en
+natte omtrek $u' = B + a\,(u - B)$ (bodembreedte $B$ blijft, de wanden worden langer):
+
+$$
+R_\text{rad} = \frac{\ln\!\left(a D / u'\right)}{\pi \sqrt{k_h k_v}} ,
+\qquad R_\text{rad} = 0 \text{ als } u' \ge aD .
+$$
+
+Voor $k_v = k_h$ is dit de bekende $\ln(D/u)/(\pi k)$. De intreeweerstand $c_\text{wg}/u$
+blijft op de werkelijke omtrek. Vergeleken met een x-z doorsnede (pakket 20 m, $k_h$ = 15 m/d,
+watergang 2 m breed, 1 m water, $c_\text{wg}$ = 0,1–1 d, $k_v/k_h$ = 1; 0,33; 0,1) wijkt de
+uitwisseling hiermee 0–1 % af onder een deklaag en 1–5 % bij een freatisch pakket; de
+isotrope formule gaf bij $k_v/k_h$ = 0,1 tot 18 % te veel uitwisseling. Je kunt ook zelf een conductance per cel opgeven; die wordt dan in dezelfde
 verhouding over de lagen verdeeld.
 
 **Bodem in een scheidende laag.** Eindigt een watergang in een scheidende laag (de deklaag,

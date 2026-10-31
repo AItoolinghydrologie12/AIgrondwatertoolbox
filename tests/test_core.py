@@ -49,6 +49,17 @@ def test_conductance_with_radial_resistance() -> None:
     assert 1.0 / C == pytest.approx(1.0 / 3.0 + math.log(20.0 / 3.0) / (math.pi * 15.0))
 
 
+def test_radial_resistance_anisotropy() -> None:
+    D, u, k, B = 20.0, 3.0, 15.0, 2.0
+    iso = radial_resistance(D, u, k)
+    assert radial_resistance(D, u, k, 1.0, B) == iso
+    a = math.sqrt(3.0)  # kv/kh = 1/3: z stretched by sqrt(3), k' = k / sqrt(3)
+    expected = math.log(a * D / (B + a * (u - B))) / (math.pi * k / a)
+    assert radial_resistance(D, u, k, 1 / 3, B) == pytest.approx(expected)
+    values = [radial_resistance(D, u, k, kv, B) for kv in (1.0, 0.33, 0.1)]
+    assert values == sorted(values)
+
+
 def test_single_layer_line_sink_is_exponential() -> None:
     T, c, q = 300.0, 500.0, -5.0
     sol = solve(LayerSystem((T,), (), c), [LineElement(0.0, 0, "flux", q)])
