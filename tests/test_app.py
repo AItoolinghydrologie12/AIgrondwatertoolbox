@@ -329,3 +329,26 @@ def test_grid_product_validation_benchmark_button() -> None:
     at.button(key="p3_bench").click().run()
     assert not at.exception, [e.value for e in at.exception]
     assert not at.error, [e.value for e in at.error]
+
+
+def test_grid_product_with_modflow6_engine() -> None:
+    """Engine MODFLOW 6: label 'Berekend met MODFLOW 6', same result as the own solver, and
+    the MF6 model as zip in the export tab. Skipped without flopy/mf6."""
+    from gwproducten.products.peilopzet_grid import mf6
+
+    if not mf6.available():
+        pytest.skip("flopy/mf6 niet geïnstalleerd")
+    page = str(APP / "pages" / "1_Grondwatertoolbox.py")
+    at = AppTest.from_file(page, default_timeout=180).run()
+    at.button(key="p3_calc").click().run()
+    own = at.session_state["p3_result"]["res"]
+    at.radio(key="p3_engine").set_value("mf6").run()
+    at.button(key="p3_calc").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    res = at.session_state["p3_result"]["res"]
+    assert res.engine == "mf6"
+    assert any("Berekend met **MODFLOW 6" in s.value for s in at.success)
+    assert abs(res.heads_new - own.heads_new).max() < 1e-5
+    at.button(key="p3_mf6zip").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.session_state["p3_mf6zip_for"] == at.session_state["p3_result"]["params"]

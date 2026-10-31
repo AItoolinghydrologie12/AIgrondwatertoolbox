@@ -270,9 +270,8 @@ def solve(
     return solution, newton
 
 
-def run(params: p3.Params, stage: str, workspace: Path, newton: bool = False) -> np.ndarray:
-    """Heads per app node (n_nodes, nrow, ncol) [m NAP] computed by MODFLOW 6 with one fixed
-    formulation (for the comparison tests)."""
+def _build_stage(params: p3.Params, stage: str, workspace: Path, newton: bool = False):
+    """The MF6 simulation of the reference ("ref") or opzet ("new") with all app inputs."""
     params.validate()
     sub = p3.subsoil_helper(params)
     T, c = p3._node_fields(params)
@@ -280,10 +279,69 @@ def run(params: p3.Params, stage: str, workspace: Path, newton: bool = False) ->
     ring = p3._ring_ghb(params, T, c)
     if ring is not None:
         boundaries.append(ring)
-    sim, node_layer, _ = build(
+    return build(
         params, boundaries, p3._wells(params, sub, stage), p3._fixed_head(params), workspace,
         newton,
     )  # fmt: skip
+
+
+README_TEXT = """MODFLOW 6-model uit de Grondwatertoolbox
+=========================================
+
+Mappen: referentie/ (peilen voor de ingreep) en opzet/ (na de ingreep). Draai in elke map:
+
+    mf6
+
+(MODFLOW 6, https://www.usgs.gov/software/modflow-6-usgs-modular-hydrologic-model). De
+stijghoogten staan daarna in gwt.hds, de waterbalans in gwt.lst.
+
+Lagen (van boven naar beneden):
+{layers}
+
+Eenheden: meter en dag. Rooster: {nrow} rijen x {ncol} kolommen, cel {cell:g} m; rij 1 is
+de zuidrand van de app-kaart. Neerslag {recharge:g} m/d.
+Watergangen (RIV), drains (DRN), GHB-groepen en putten (WEL) staan elk in een eigen pakket,
+genoemd naar de groep in de app. De conductances zijn door de app berekend (Ernst met
+kv/kh, celgrootte-correctie De Lange). Transmissiviteit: {conv}.
+"""
+
+
+def model_zip(params: p3.Params) -> bytes:
+    """Zip of the MF6 input files (reference and opzet) plus a short LEESMIJ.txt; only model
+    input, no paths or other data of the user."""
+    import io
+    import tempfile
+    import zipfile
+
+    _, _, props, node_layer = _layers(params)
+    labels = {layer: n.label for layer, n in zip(node_layer, params.stack.nodes, strict=True)}
+    layers = "\n".join(
+        f"  laag {i + 1}: {labels.get(i, 'scheidende laag (K33 = D/c)')}" for i in range(len(props))
+    )
+    text = README_TEXT.format(
+        layers=layers, nrow=params.nrow, ncol=params.ncol, cell=params.cell,
+        recharge=params.recharge,
+        conv="volgt de natte dikte (ICELLTYPE 1)" if params.convertible else "vast",
+    )  # fmt: skip
+    buffer = io.BytesIO()
+    with (
+        tempfile.TemporaryDirectory(prefix="gwt_zip_") as tmp,
+        zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf,
+    ):
+        zf.writestr("LEESMIJ.txt", text)
+        for stage, folder in (("ref", "referentie"), ("new", "opzet")):
+            ws = Path(tmp) / folder
+            sim, _, _ = _build_stage(params, stage, ws)
+            sim.write_simulation(silent=True)
+            for f in sorted(ws.iterdir()):
+                zf.write(f, f"{folder}/{f.name}")
+    return buffer.getvalue()
+
+
+def run(params: p3.Params, stage: str, workspace: Path, newton: bool = False) -> np.ndarray:
+    """Heads per app node (n_nodes, nrow, ncol) [m NAP] computed by MODFLOW 6 with one fixed
+    formulation (for the comparison tests)."""
+    sim, node_layer, _ = _build_stage(params, stage, workspace, newton)
     sim.write_simulation(silent=True)
     ok, out = sim.run_simulation(silent=True)
     if not ok:
