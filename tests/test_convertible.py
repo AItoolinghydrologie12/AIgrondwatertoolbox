@@ -56,6 +56,17 @@ def test_drying_cells_converge_at_minimum_thickness() -> None:
     )  # fmt: skip
     assert sol.converged
     assert sol.dry[0, n // 2, n // 2]
-    t_min = 10.0 * MIN_SATURATED_FRACTION * 10.0
+    t_min = 10.0 * MIN_SATURATED_FRACTION * 10.0  # k * 1 % of D
     assert sol.transmissivity[0, n // 2, n // 2] == pytest.approx(t_min)
     assert sol.mass_balance_error < 1e-6
+
+
+def test_cell_flipping_between_wet_and_dry_converges() -> None:
+    """Two wells in a thin, poor phreatic layer (T = 5 m2/d): a cell next to the wells
+    alternates wet/dry under plain Picard; the per-cell damping makes it converge."""
+    from gwproducten.products import peilopzet_grid as p3
+
+    for q in (150.0, 3000.0):
+        wells = (p3.WellGroup("bem", ((20, 20), (20, 21)), "freatisch", 0.0, q),)
+        res = p3.compute(p3.Params(wells=wells))
+        assert not any("niet geconvergeerd" in w for w in res.warnings), q

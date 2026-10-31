@@ -957,6 +957,13 @@ def show_validation(params: p3.Params, res: p3.Result) -> None:
         "cel, lijn → cellen, peilopzet vs 1D-analytisch met en zonder celgrootte-correctie, "
         "gridverfijning, massabalans)."
     )
+    st.markdown(
+        "**Vergelijking met MODFLOW 6** (`tests/test_mf6_comparison.py`, lokaal met flopy): "
+        "zelfde rooster met elke laag als MF6-modellaag. Stijghoogten gelijk binnen 10⁻⁶ m "
+        "voor vaste en meebewegende T (MF6 'convertible'), putten, kwel, zones en alle "
+        "randtypen. Verschillen alleen bij droogvallende cellen en t.o.v. MF6-Newton "
+        "(stroomopwaartse weging van de natte dikte, enkele cm bij grote verlaging)."
+    )
     st.dataframe(dict_table(res.mass_balance, "Massabalansfout [-]", "{:.1e}"), hide_index=True)
     st.dataframe(
         dict_table({f"Iteraties RIV/DRN {k}": v for k, v in res.iterations.items()}, fmt="{:.0f}"),
@@ -969,7 +976,7 @@ def show_validation(params: p3.Params, res: p3.Result) -> None:
     )
     if st.button("Benchmark draaien", key=f"{KEY}_bench"):
         rows = []
-        for cs in (25.0, 12.5, 5.0):
+        for cs in (50.0, 25.0, 10.0):  # the allowed cell sizes (10-50 m)
             for corr in (True, False):
                 qn, qa = p3.strip_benchmark(params.stack, cs, corr)
                 rows.append(

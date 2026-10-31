@@ -24,6 +24,10 @@ dev = [
     "pytest==9.2.0",
     "ruff==0.17.3",
 ]
+# only for the validation against MODFLOW 6 (tests/test_mf6_comparison.py); not on the cloud
+mf6 = [
+    "flopy==3.11.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["gwproducten*"]

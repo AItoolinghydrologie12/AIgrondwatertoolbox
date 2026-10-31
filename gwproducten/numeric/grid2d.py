@@ -36,6 +36,9 @@ PCG_MAX_CHANGED = 50
 PCG_MAX_CHANGED_FRACTION = 0.02
 MAX_CACHED_LU = 3  # factorisations kept (reference, opzet, run without wells)
 HEAD_TOL = 1e-5  # [m] head change between iterations that ends the convertible iteration
+# transmissivity update: after this many iterations, the step of a cell whose head reverses
+# is multiplied by RELAX (down to RELAX_MIN)
+RELAX_AFTER, RELAX, RELAX_MIN = 3, 0.5, 0.01
 MIN_SATURATED_FRACTION = 0.01  # saturated thickness never below 1 % of the layer thickness
 
 
@@ -246,6 +249,7 @@ def solve_grid(
         if name in active and np.shape(state) == active[name].shape:
             active[name] = np.asarray(state, dtype=bool).copy()
     h = np.full(n, np.nan)
+    h_t = None  # heads behind the current transmissivities of convertible layers
     converged = False
     iterations = 0
     M = base
@@ -269,18 +273,29 @@ def solve_grid(
                 changed = True
             active[b.name] = new
         layers = [i for i, cv in enumerate(conv) if cv is not None]
-        if layers:
+        if layers:  # head change outside dry cells (whose head is meaningless and ill-posed)
             heads, prev = h.reshape(nl, nrow, ncol), h_prev.reshape(nl, nrow, ncol)
-            if not np.all(np.isfinite(prev[layers])) or (
-                np.max(np.abs(heads[layers] - prev[layers])) > HEAD_TOL
-            ):
-                changed = True
+            for i in layers:
+                wet = ~(conv[i].dry(heads[i]) & conv[i].dry(prev[i]))
+                if not np.all(np.isfinite(prev[i])) or (
+                    np.any(wet) and np.max(np.abs(heads[i] - prev[i])[wet]) > HEAD_TOL
+                ):
+                    changed = True
         if not changed:
             converged = True
             break
         if layers:  # new transmissivities for the next solve
+            if h_t is None:
+                h_t, step, relax = heads.copy(), np.zeros_like(heads), np.ones_like(heads)
+            else:  # per cell: halve the step where it reverses (delta-bar-delta, as MF6)
+                new_step = heads - h_t
+                if iterations > RELAX_AFTER:
+                    flip = new_step * step < 0
+                    relax = np.where(flip, np.maximum(RELAX * relax, RELAX_MIN), relax)
+                step = relax * new_step
+                h_t = h_t + step
             for i in layers:
-                t_cur[i] = np.asarray(conv[i].k) * conv[i].saturated(heads[i])
+                t_cur[i] = np.asarray(conv[i].k) * conv[i].saturated(h_t[i])
             base = build_base(t_cur)
 
     flux_out = {}
