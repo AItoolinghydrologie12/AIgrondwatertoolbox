@@ -757,7 +757,7 @@ elif current != done["params"]:
         "Klik op **Bereken** om opnieuw te rekenen.",
     )
 else:
-    status = ("success", f"Berekend in {done['seconds']:.1f} s.")
+    status = ("success", f"Berekend in {done['res'].seconds:.1f} s.")
 getattr(c_msg, status[0])(status[1])
 getattr(status_side, status[0])(status[1])
 if input_error is not None:
@@ -1064,7 +1064,7 @@ NO_RESULT = "Nog geen resultaat: klik op **Bereken**."
 with step3:
     if done is not None:
         engine_badge(done["params"], done["res"])
-        show_kpis(done["params"], done["res"], done["seconds"])
+        show_kpis(done["params"], done["res"], done["res"].seconds)
     t_res, t_theory, t_ass, t_val, t_exp = st.tabs(TABS)
     with t_theory:
         st.markdown(theory)

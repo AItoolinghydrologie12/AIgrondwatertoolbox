@@ -186,10 +186,12 @@ with vergelijk:
         label="h_MF6 − h_eigen [m]",
         diverging=True,
         wells=[{"name": g.name, "cells": g.cells} for g in params.wells],
+        min_span=0.01,
     )
     st.plotly_chart(fig, width="stretch", config=MAP_CONFIG, key=f"{KEY}_cmp_map")
-    st.caption("Rood/blauw = MODFLOW 6 hoger/lager dan de eigen solver. Bij verschillen "
-               "kleiner dan een duizendste millimeter is de kaart alleen rekenruis.")  # fmt: skip
+    st.caption("Blauw = MODFLOW 6 hoger, rood = lager dan de eigen solver. De kleurschaal loopt "
+               "minimaal van −1 tot +1 cm: een witte kaart betekent verschillen van hooguit "
+               "enkele millimeters (hier meestal alleen rekenruis).")  # fmt: skip
 
     st.markdown("**Waterbalans na opzet [m³/d]**")
     budget = pd.DataFrame(
