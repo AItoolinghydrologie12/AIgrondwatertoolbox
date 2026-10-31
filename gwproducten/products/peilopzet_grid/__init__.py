@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import dataclasses
+import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -43,6 +45,7 @@ MAX_CELLS_PER_SIDE = 100
 MAX_ZONES = 5
 BOUNDARIES = ("vast", "doorlopend", "gesloten", "per_laag")
 RING_KINDS = ("vast", "doorlopend", "gesloten")  # per layer with "per_laag"
+ENGINES = ("eigen", "mf6")
 RING_GHB = "rand (doorlopend)"
 RESERVED_NAMES = (
     "neerslag", "buisdrainage", "maaiveld", "rand", RING_GHB, "kwel onderrand", "basis",
@@ -165,6 +168,7 @@ class Params:
     threshold: float = param(0.05, "m", "Grens verhoging", 0.001, 1.0)
     grid_correction: bool = True
     convertible: bool = True  # T follows the saturated thickness (MODFLOW 6 convertible)
+    engine: str = "eigen"  # calculation engine: "eigen" (own solver) or "mf6" (MODFLOW 6)
 
     @property
     def nrow(self) -> int:
@@ -180,6 +184,8 @@ class Params:
             errors.append(
                 f"Dit product ondersteunt maximaal {MAX_AQUIFERS} watervoerende pakketten."
             )
+        if self.engine not in ENGINES:
+            errors.append(f"Rekenkern moet een van {', '.join(ENGINES)} zijn (nu '{self.engine}').")
         if self.boundary not in BOUNDARIES:
             errors.append(
                 f"Modelrand moet een van {', '.join(BOUNDARIES)} zijn (nu '{self.boundary}')."
@@ -391,6 +397,9 @@ class Result:
     zone_names: list[str]  # per zone index, "basis" first
     well_drawdown: np.ndarray | None = None  # (n_nodes, nrow, ncol) by the wells (opzet) [m]
     wells: pd.DataFrame | None = None  # per well: cell average and head in the well
+    engine: str = "eigen"  # engine that produced the result (after a possible fallback)
+    engine_note: str = ""  # e.g. "MODFLOW 6 (standaard)" or the reason for a fallback
+    seconds: float = 0.0  # calculation time [s]
 
 
 PEACEMAN = 0.198  # equivalent radius r_e / dx of a well in a square cell (isotropic)
@@ -618,24 +627,36 @@ def compute(params: Params) -> Result:
     ring_ghb = _ring_ghb(params, T, c)
     convertible = _convertible(params)
 
-    # Both runs share the grid matrix; the opzet run starts from the reference states.
-    sols = {}
+    t_start = time.perf_counter()
+    # Own solver: both runs share the grid matrix; the opzet run starts from the reference.
     factorization = Factorization()
+
+    def boundaries(run: str) -> list[HeadBoundary]:
+        return _boundaries(params, sub, run, cond) + ([ring_ghb] if ring_ghb else [])
 
     def solve_run(run: str, with_wells: bool = True, start=None):
         """``start``: earlier run whose states (and transmissivities) are the first guess."""
         return solve_grid(
             T if start is None else list(start.transmissivity),
-            c, params.nrow, params.ncol, params.cell, params.recharge,
-            _boundaries(params, sub, run, cond) + ([ring_ghb] if ring_ghb else []),
+            c, params.nrow, params.ncol, params.cell, params.recharge, boundaries(run),
             fixed_head=fixed,
             fluxes=_wells(params, sub, run) if with_wells else (),
             initial_active=None if start is None else start.active,
             factorization=factorization, convertible=convertible,
         )  # fmt: skip
 
-    sols["ref"] = solve_run("ref")
-    sols["new"] = solve_run("new", start=sols["ref"])
+    # the opzet run without wells gives the (nonlinear) well drawdown
+    nonlinear = any(cv is not None for cv in convertible) or params.engine == "mf6"
+    need_no_wells = nonlinear and any(g.q_new != 0 for g in params.wells)
+    engine, engine_note, sols = "eigen", "eigen solver", None
+    if params.engine == "mf6":
+        sols, engine_note = _mf6_runs(params, boundaries, sub, fixed, T, convertible, need_no_wells)
+        engine = "mf6" if sols else "eigen"
+    if sols is None:
+        sols = {"ref": solve_run("ref")}
+        sols["new"] = solve_run("new", start=sols["ref"])
+        if need_no_wells:
+            sols["no_wells"] = solve_run("new", with_wells=False, start=sols["ref"])
     ref, new = sols["ref"], sols["new"]
 
     rows = [
@@ -739,9 +760,8 @@ def compute(params: Params) -> Result:
 
     heads_ref, heads_new = shown(ref), shown(new)
     well_drawdown = None
-    if new.flux_response is not None and any(cv is not None for cv in convertible):
-        # nonlinear: drawdown = difference with the same run without the wells
-        well_drawdown = shown(solve_run("new", with_wells=False, start=ref)) - heads_new
+    if "no_wells" in sols:  # nonlinear: drawdown = difference with the run without wells
+        well_drawdown = shown(sols["no_wells"]) - heads_new
     elif new.flux_response is not None:
         well_drawdown = -new.flux_response  # linear: exact response, drawdown positive
     for j, node in enumerate(nodes):
@@ -815,7 +835,35 @@ def compute(params: Params) -> Result:
         zone_names=zone_names,
         well_drawdown=well_drawdown,
         wells=wells,
+        engine=engine,
+        engine_note=engine_note,
+        seconds=time.perf_counter() - t_start,
     )
+
+
+def _mf6_runs(params, boundaries, sub, fixed, T, convertible, need_no_wells):
+    """Reference, opzet (and opzet without wells) with MODFLOW 6 in a temporary folder that
+    is removed afterwards. Returns (solutions, note); solutions None on a fallback."""
+    from gwproducten.products.peilopzet_grid import mf6
+
+    if not mf6.available():
+        return None, "MODFLOW 6 is hier niet beschikbaar; berekend met de eigen solver."
+    runs = [("ref", "ref", True), ("new", "new", True)]
+    if need_no_wells:
+        runs.append(("no_wells", "new", False))
+    sols, newton_used = {}, False
+    try:
+        with tempfile.TemporaryDirectory(prefix="gwt_mf6_") as tmp:
+            for key, stage, with_wells in runs:
+                sols[key], newton = mf6.solve(
+                    params, boundaries(stage),
+                    _wells(params, sub, stage) if with_wells else [], fixed, T, convertible,
+                    Path(tmp) / key,
+                )  # fmt: skip
+                newton_used |= newton
+    except (RuntimeError, OSError) as err:
+        return None, f"{err} Resultaat berekend met de eigen solver."
+    return sols, f"MODFLOW {mf6.version()} ({'Newton' if newton_used else 'standaard'})"
 
 
 def strip_benchmark(stack: LayerStack, cell: float, correction: bool) -> tuple[float, float]:
