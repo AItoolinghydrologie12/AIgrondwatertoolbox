@@ -145,6 +145,8 @@ de app onder **Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`)
 - Put in een lekkend pakket tegen De Glee: binnen 2 % vanaf 3 cellen van de put.
 - Overgang tussen zones (harmonisch gemiddelde): exact tegen twee pakketdelen in serie.
 - Bodem in een scheidende laag tegen een numerieke x-z doorsnede (zie bekende beperkingen).
+- Radiale weerstand met anisotropie (kv/kh = 1; 0,33; 0,1) tegen een x-z doorsnede: 0–1 %
+  afwijking onder een deklaag, 1–5 % bij een freatisch pakket.
 - Massabalans < 10⁻⁸ in alle scenario's; roosterverfijning convergeert naar de analytische
   oplossing.
 
@@ -158,7 +160,8 @@ de app onder **Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`)
 **Algemeen**
 - Alleen stationair.
 - Lineaire schematisering: de verzadigde dikte van de freatische laag verandert niet.
-- De uitwisseling van een watergang volgt C' = 1/(c/u + ln(D/u)/(πk)). Dit geldt voor een
+- De uitwisseling van een watergang volgt C' = 1/(c/u + R_rad), met de radiale weerstand
+  R_rad = ln(aD/u')/(π√(kh·kv)), a = √(kh/kv) (Ernst, anisotroop). Dit geldt voor een
   natte omtrek die klein is ten opzichte van de laagdikte.
 - Een watergang die **in de deklaag eindigt** is analytisch benaderd (wanden naar de
   freatische laag, bodem via de resterende klei naar pakket 1); dit kan 25–50 % afwijken van
@@ -182,8 +185,8 @@ de app onder **Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`)
   berekening (referentie + opzet); op een gedeelde cloudserver langer.
 - Transmissiviteit vast (lineair); maximaal 4 pakketten.
 - **Anisotropie** kv/kh per pakket (standaard 0,33): de weerstand tussen pakketten is
-  c + D₁/(2kv₁) + D₂/(2kv₂), zoals MODFLOW 6 met één laag per pakket. De radiale weerstand van
-  watergangen gebruikt (nog) alleen kh.
+  c + D₁/(2kv₁) + D₂/(2kv₂), zoals MODFLOW 6 met één laag per pakket. Ook de radiale
+  weerstand van watergangen rekent met kv/kh (Ernst met opgerekte verticale maten).
 - **Zones** (max 5): zelfde opbouw als de basis (schematisering en aantal lagen), eigen
   diktes, k, c en maaiveld; diktes tellen vanaf het lokale maaiveld, drainage volgt het
   lokale maaiveld. Tussen cellen het harmonisch gemiddelde van T. Lagen die echt uitwiggen

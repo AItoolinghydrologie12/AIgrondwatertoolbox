@@ -67,7 +67,6 @@ class Subsoil:
 
     stack: LayerStack = field(default_factory=LayerStack)
     w: float = param(100.0, "d", "Drainageweerstand w", 1.0, 1e5)
-    anisotropy: float = param(1.0, "-", "Anisotropie kv/kh pakketten (x-z)", 0.01, 1.0)
     dx_min: float = param(0.5, "m", "Kleinste cel 1D", 0.05, 10.0)
     dx_min_xz: float = param(0.25, "m", "Kleinste cel x-z (breedte)", 0.05, 5.0)
     dz_xz: float = param(0.5, "m", "Celhoogte x-z", 0.05, 5.0)
@@ -132,7 +131,11 @@ class Subsoil:
                     r = strip_resistance(d.width, rest, lay.k_h, kv)
                     add(1, d.entry_resistance / d.width + r)
                 continue
-            r = radial_resistance(lay.thickness, ct.perimeter, lay.k_h) if ct.has_bottom else 0.0
+            r = (
+                radial_resistance(lay.thickness, ct.perimeter, lay.k_h, lay.anisotropy, d.width)
+                if ct.has_bottom
+                else 0.0
+            )
             add(ct.node, d.entry_resistance / ct.perimeter + r)
         return sorted(parts.items())
 
@@ -166,7 +169,7 @@ class Subsoil:
                 dz = min(dz, 0.25 * min(d.water_depth for d in touching))
             nsub = int(np.clip(math.ceil(lay.thickness / dz), 2, 60))
             if lay.kind == "pakket":
-                out.append(XZLayer(lay.thickness, lay.k_h, lay.k_h * self.anisotropy, nsub))
+                out.append(XZLayer(lay.thickness, lay.k_h, lay.k_h * lay.anisotropy, nsub))
             else:
                 kv = lay.thickness / lay.c
                 out.append(XZLayer(lay.thickness, max(lay.k_h, kv), kv, nsub))
@@ -213,11 +216,6 @@ def validity_warnings(sub: Subsoil, ditches: tuple[Ditch, ...]) -> list[str]:
                 "afwijking t.o.v. de x-z doorsnede kan 25–50 % zijn. De x-z doorsnede is hier "
                 "maatgevend."
             )
-    if sub.anisotropy < 0.2:
-        warnings.append(
-            "Sterke anisotropie (kv/kh < 0,2): de analytische radiale weerstand is dan te "
-            "klein; de x-z doorsnede is maatgevend."
-        )
     return warnings
 
 
