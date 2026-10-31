@@ -13,6 +13,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from draw_actions import NEW, apply_selection, new_zone
+from engine_ui import ENGINE_LABEL, engine_badge, mf6_status, model_zip, run
 from grid_ui import (
     absolute_lines,
     centre_key,
@@ -304,11 +305,6 @@ def group_tables(labels: dict[str, str]) -> None:
             st.rerun()
 
 
-@st.cache_data(show_spinner="Rekenen…", max_entries=20)  # bounded: shared memory in the cloud
-def run(params: p3.Params) -> p3.Result:
-    return p3.compute(params)
-
-
 # ---- zijbalk: rekenen, model en numeriek ----------------------------------------------
 clicked = st.sidebar.button(
     "Bereken", type="primary", icon=":material/play_arrow:", key=f"{KEY}_calc_side",
@@ -339,6 +335,16 @@ with st.sidebar.expander("Beoordeling en numeriek", expanded=False):
         help="Uit: T = kh·D blijft vast (lineair model). Aan: T = kh × natte dikte in het "
         "freatisch pakket en in pakketten waar de stijghoogte onder de bovenkant zakt.",
     )
+    mf6_ok, mf6_msg = mf6_status()
+    if not mf6_ok and ss.get(f"{KEY}_engine") == "mf6":
+        ss[f"{KEY}_engine"] = "eigen"  # e.g. a project saved where MODFLOW 6 was installed
+    values["engine"] = st.radio(
+        "Rekenkern", list(ENGINE_LABEL), format_func=ENGINE_LABEL.get, key=f"{KEY}_engine",
+        disabled=not mf6_ok,
+        help="Eigen solver: snel, rekent dezelfde vergelijkingen als MODFLOW 6. MODFLOW 6: "
+        "het model wordt echt door MODFLOW 6 (USGS) gerekend; langzamer. Zie de pagina "
+        "'Rekenkern MODFLOW 6' voor de verschillen. " + mf6_msg,
+    )  # fmt: skip
 
 step1, step2, step3 = st.tabs(STEPS, key=f"{KEY}_step")
 
@@ -1040,11 +1046,24 @@ def show_export(
     if prof is not None:
         csv_button(prof.round(4), "peilopzet2d_profiel.csv", "Dwarsprofiel (CSV)")
     png_buttons(figures, KEY)
+    st.markdown("**MODFLOW 6-model**")
+    st.caption(
+        "Dezelfde berekening als invoerbestanden voor MODFLOW 6 (referentie en opzet, met een "
+        "LEESMIJ), om zelf te draaien of na te lopen. Bevat alleen modelinvoer."
+    )
+    if st.button("MODFLOW 6-model maken", key=f"{KEY}_mf6zip"):
+        ss[f"{KEY}_mf6zip_for"] = params
+    if ss.get(f"{KEY}_mf6zip_for") == params:
+        st.download_button(
+            "MODFLOW 6-model (zip)", model_zip(params), file_name="grondwatertoolbox_mf6.zip",
+            mime="application/zip", icon=":material/download:", key=f"{KEY}_mf6zip_dl",
+        )  # fmt: skip
 
 
 NO_RESULT = "Nog geen resultaat: klik op **Bereken**."
 with step3:
     if done is not None:
+        engine_badge(done["params"], done["res"])
         show_kpis(done["params"], done["res"], done["seconds"])
     t_res, t_theory, t_ass, t_val, t_exp = st.tabs(TABS)
     with t_theory:
