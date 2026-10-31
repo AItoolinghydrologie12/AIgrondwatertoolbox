@@ -217,11 +217,13 @@ def result_figure(
     profile: list[tuple[float, float]] | None = None,
     click_snap: float | None = None,
     wells: list[dict[str, Any]] | None = None,
+    min_span: float = 0.0,
 ) -> go.Figure:
     """Contour map of a result field with watercourse cells outlined, an optional profile
-    line, and (``click_snap``) a last trace of click points on a snap grid."""
+    line, and (``click_snap``) a last trace of click points on a snap grid. ``min_span``:
+    smallest half-range of a diverging scale, so that tiny values stay near white."""
     if diverging:
-        vmax = float(np.nanmax(np.abs(z))) or 1.0
+        vmax = max(float(np.nanmax(np.abs(z))), min_span) or 1.0
         scale = {"colorscale": "RdBu", "zmin": -vmax, "zmax": vmax}
     else:
         scale = {"colorscale": "Viridis_r" if reverse else "Viridis"}
