@@ -29,7 +29,9 @@ $$
   watergangen rekent met de anisotropie (zie *Conductance per cel*).
 - **Neerslagoverschot** $N$ [m/d] op de freatische knoop van elke cel.
 - **Modelrand**: vaste stijghoogte in de buitenste ring cellen (alle lagen), **doorlopend
-  pakket**, gesloten (geen stroming), of **per laag** een van deze drie.
+  pakket**, gesloten (geen stroming), of **per laag** een van deze drie. Zoals in MODFLOW 6
+  werken neerslag, watergangen, drains en putten niet op een cel met vaste stijghoogte (dat
+  water zou direct in de vaste rand verdwijnen); de waterbalans telt ze daar niet mee.
 
 **Doorlopend pakket.** Buiten het model loopt elk pakket door als half oneindig lekkend
 pakket dat ongestoord op het randpeil $h_r$ staat. Een afwijking aan de rand dempt daar uit

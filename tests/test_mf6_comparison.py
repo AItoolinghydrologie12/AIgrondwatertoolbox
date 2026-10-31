@@ -78,3 +78,37 @@ def test_without_convertible_matches_mf6_confined(tmp_path: Path) -> None:
     res = p3.compute(par)
     h = mf6.run(par, "new", tmp_path)
     assert np.max(np.abs(h - res.heads_new)) < 1e-5
+
+
+@pytest.mark.parametrize("name", list(CASES))
+def test_compute_with_mf6_engine_equals_own_solver(name: str) -> None:
+    """The whole product with MODFLOW 6 as engine: same heads, same water balance per item
+    (read from the MF6 listing), same well table and messages as the own solver."""
+    own = p3.compute(CASES[name])
+    mf = p3.compute(dataclasses.replace(CASES[name], engine="mf6"))
+    assert (own.engine, mf.engine) == ("eigen", "mf6")
+    assert mf.engine_note.startswith("MODFLOW 6")
+    assert np.max(np.abs(mf.heads_new - own.heads_new)) < 1e-5
+    assert np.max(np.abs(mf.rise - own.rise)) < 1e-5
+    scale = own.budget.abs().to_numpy().max()
+    diff = (mf.budget - own.budget).drop(index="som (balansfout)").abs().to_numpy().max()
+    assert diff < 1e-4 * scale
+    assert max(mf.mass_balance.values()) < 1e-6
+    assert mf.inundated == own.inundated
+    if own.well_drawdown is not None:
+        assert np.max(np.abs(mf.well_drawdown - own.well_drawdown)) < 1e-4
+        assert np.allclose(mf.wells.select_dtypes("number"), own.wells.select_dtypes("number"),
+                           atol=1e-4, equal_nan=True)  # fmt: skip
+    strip = [w for w in own.warnings if "geconvergeerd" not in w]
+    assert [w for w in mf.warnings if "geconvergeerd" not in w] == strip
+
+
+def test_mf6_failure_falls_back_to_own_solver(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(*args, **kwargs):
+        raise RuntimeError("MODFLOW 6 is niet geconvergeerd (standaard en Newton).")
+
+    monkeypatch.setattr(mf6, "solve", fail)
+    res = p3.compute(dataclasses.replace(p3.Params(), engine="mf6"))
+    assert res.engine == "eigen"
+    assert "niet geconvergeerd" in res.engine_note and "eigen solver" in res.engine_note
+    np.testing.assert_allclose(res.heads_new, p3.compute(p3.Params()).heads_new)

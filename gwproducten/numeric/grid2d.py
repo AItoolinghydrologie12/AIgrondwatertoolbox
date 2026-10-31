@@ -21,6 +21,7 @@ A :class:`Factorization` can be shared between runs on the same grid (reference 
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -208,11 +209,6 @@ def solve_grid(
         ) + sp.diags(diag)  # fmt: skip
 
     base = build_base(t_cur)
-    rhs_fixed_flux = np.zeros(n)
-    for f in fluxes:
-        np.add.at(rhs_fixed_flux, f.keys, f.rate)
-    rhs0 = rhs_fixed_flux.copy()
-    rhs0[idx[0].ravel()] += recharge * area
 
     if fixed_head is None or np.isscalar(fixed_head):
         ring_heads: list[float | None] = [fixed_head] * nl  # type: ignore[list-item]
@@ -231,6 +227,20 @@ def solve_grid(
             h_fix[idx[layer, ring]] = hf
     free = np.flatnonzero(~fixed)
     fix = np.flatnonzero(fixed)
+
+    # as MODFLOW 6: recharge, head-dependent boundaries and wells do not act on fixed-head
+    # cells (their water would only pass straight into the fixed head)
+    boundaries = [
+        dataclasses.replace(b, conductance=np.where(fixed[b.keys], 0.0, b.conductance))
+        for b in boundaries
+    ]
+    fluxes = [dataclasses.replace(f, rate=np.where(fixed[f.keys], 0.0, f.rate)) for f in fluxes]
+    rhs_fixed_flux = np.zeros(n)
+    for f in fluxes:
+        np.add.at(rhs_fixed_flux, f.keys, f.rate)
+    rhs0 = rhs_fixed_flux.copy()
+    top_free = idx[0].ravel()[~fixed[idx[0].ravel()]]
+    rhs0[top_free] += recharge * area
 
     def assemble(active: dict[str, np.ndarray]) -> tuple[sp.csr_matrix, np.ndarray]:
         d_add = np.zeros(n)
@@ -320,7 +330,7 @@ def solve_grid(
         dh[free] = factorization.solve(M[free][:, free].tocsc(), rhs_fixed_flux[free])
         response = dh.reshape(nl, nrow, ncol)
 
-    total_recharge = recharge * area * nrow * ncol
+    total_recharge = recharge * area * top_free.size
     terms = np.array([total_recharge, lateral, *flux_out.values()])
     error = abs(terms.sum()) / max(np.abs(terms).sum() / 2.0, 1e-300)
     return GridSolution(
