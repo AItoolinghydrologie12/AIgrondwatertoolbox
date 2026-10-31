@@ -11,9 +11,11 @@ from gwproducten.products.peilopzet_grid import mf6
 ENGINE_LABEL = {"eigen": "eigen solver (snel)", "mf6": "MODFLOW 6"}
 
 
-@st.cache_resource(show_spinner="MODFLOW 6 zoeken…")
+@st.cache_resource(show_spinner="MODFLOW 6 klaarzetten (eenmalig)…")
 def mf6_status() -> tuple[bool, str]:
-    """(available, explanation); checked once per server."""
+    """(available, explanation); checked once per server. On the Linux cloud server this
+    downloads the fixed MODFLOW 6 release once and verifies its SHA-256."""
+    mf6.ensure_mf6()
     if mf6.available():
         return True, f"MODFLOW {mf6.version()} beschikbaar."
     return False, "MODFLOW 6 is op deze server niet geïnstalleerd; de eigen solver rekent."
