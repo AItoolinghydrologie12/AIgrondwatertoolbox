@@ -190,6 +190,12 @@ de app onder **Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`)
 *Documentation for the MODFLOW 6 Groundwater Flow Model*, USGS Techniques and Methods
 6-A55). Volledige verwijzingen staan onder **Theorie** in de app.
 
+**MODFLOW 6 en flopy** zijn software van de U.S. Geological Survey, open source en in het
+publieke domein: vrij te gebruiken en te verspreiden, ook beroepsmatig. Bij gebruik
+vermelden: Langevin e.a. (2017, zie boven) en Bakker, M. e.a. (2016), *Scripting MODFLOW
+model development using Python and FloPy*, Groundwater 54(5). De Grondwatertoolbox is geen
+product van en niet goedgekeurd door de USGS.
+
 ## Bekende beperkingen
 
 **Algemeen**
