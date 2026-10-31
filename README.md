@@ -93,13 +93,24 @@ Validatie · Export*.
 | pytest, ruff | tests en lint/format (alleen ontwikkeling) |
 | flopy (optioneel, `.[mf6]`) | alleen voor de validatie tegen MODFLOW 6; niet in `requirements.txt` |
 
-De app rekent met een eigen solver; flopy en MODFLOW 6 dienen alleen als controle.
+De app rekent standaard met een eigen solver; MODFLOW 6 (via flopy) is de tweede rekenkern en
+de referentie voor de tests.
 
 ## Rekenmethode en verantwoording
 
-De Grondwatertoolbox rekent met **een eigen numerieke oplosser in Python** (numpy/scipy). Er
-draait **geen MODFLOW**. De opzet volgt wel bewust de principes van MODFLOW 6 (USGS), zodat
-uitkomsten vergelijkbaar en controleerbaar zijn. De volledige afleiding met formules staat in
+De Grondwatertoolbox heeft **twee rekenkernen** die dezelfde vergelijkingen oplossen:
+
+- **eigen solver** (standaard): een numerieke oplosser in Python (numpy/scipy), snel;
+- **MODFLOW 6** (USGS): de app bouwt een MF6-model met flopy, laat `mf6` rekenen en leest
+  stijghoogten en waterbalans terug. Eerst de standaardformulering; bij droogvallende cellen
+  of geen convergentie Newton; lukt ook dat niet, dan rekent de eigen solver en meldt de app
+  dat.
+
+Kiezen: zijbalk *Beoordeling en numeriek* → **Rekenkern**. Het resultaat toont altijd waarmee
+gerekend is. De pagina **Rekenkern MODFLOW 6** legt de verschillen uit en rekent je model met
+beide kernen; onder *Export* staat het MODFLOW 6-model als zip. In beide gevallen maakt de app
+zelf de invoer (conductances van watergangen, doorlopende rand) en de putstijghoogte
+(Peaceman). De volledige afleiding met formules staat in
 de app onder **Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`).
 
 **Waar wat staat in de code**
