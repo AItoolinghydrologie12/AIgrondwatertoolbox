@@ -108,12 +108,14 @@ def test_grid_product_wells_ghb_seepage_and_layer_boundary() -> None:
     at.run()
     at.toggle(key="p3_kwel").set_value(True).run()
     at.radio(key="p3_bnd").set_value("per_laag").run()
-    at.toggle(key="p3_bfix_freatisch").set_value(False).run()
+    at.selectbox(key="p3_bkind_freatisch").set_value("gesloten").run()
+    at.selectbox(key="p3_bkind_pakket1").set_value("doorlopend").run()
     at.button(key="p3_calc").click().run()
     assert not at.exception, [e.value for e in at.exception]
     assert not at.error, [e.value for e in at.error]
     par = at.session_state["p3_result"]["params"]
     assert par.seepage and par.boundary_layers == (None, 3.8)
+    assert par.boundary_kinds == ("gesloten", "doorlopend")
     assert [g.name for g in par.wells] == ["Bemaling"] and len(par.ghb[0].cells) == 40
     budget = at.session_state["p3_result"]["res"].budget
     assert {"Bemaling", "Boezem", "kwel onderrand"} <= set(budget.index)

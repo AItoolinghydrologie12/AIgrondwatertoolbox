@@ -41,8 +41,12 @@ THEORY = (Path(__file__).parent / "theory.md").read_text(encoding="utf-8")
 MAX_AQUIFERS = 4
 MAX_CELLS_PER_SIDE = 100
 MAX_ZONES = 5
-BOUNDARIES = ("vast", "gesloten", "per_laag")
-RESERVED_NAMES = ("neerslag", "buisdrainage", "maaiveld", "rand", "kwel onderrand", "basis")
+BOUNDARIES = ("vast", "doorlopend", "gesloten", "per_laag")
+RING_KINDS = ("vast", "doorlopend", "gesloten")  # per layer with "per_laag"
+RING_GHB = "rand (doorlopend)"
+RESERVED_NAMES = (
+    "neerslag", "buisdrainage", "maaiveld", "rand", RING_GHB, "kwel onderrand", "basis",
+)  # fmt: skip
 WARN_PHREATIC_DRAWDOWN = 0.25  # fraction of the phreatic layer thickness
 KINDS = ("riv", "drn")
 KIND_LABEL = {"riv": "RIV (in- en uitstroom)", "drn": "drain (alleen afvoer)"}
@@ -144,6 +148,8 @@ class Params:
     boundary: str = "vast"
     boundary_head: float = param(3.8, "m NAP", "Stijghoogte vaste rand", -50.0, 50.0)
     boundary_layers: tuple[float | None, ...] = ()  # per node with "per_laag"; None = closed
+    # per node with "per_laag", one of RING_KINDS; empty: from boundary_layers (None = closed)
+    boundary_kinds: tuple[str, ...] = ()
     mv_resistance: float = param(5.0, "d", "Weerstand maaivelddrainage", 0.1, 1e4)
     drain_cells: tuple[Cell, ...] = ()
     drain_depth: float = param(1.0, "m", "Diepte buisdrainage onder maaiveld", 0.1, 5.0)
@@ -175,14 +181,21 @@ class Params:
             )
         if self.boundary not in BOUNDARIES:
             errors.append(
-                f"Modelrand moet 'vast', 'gesloten' of 'per_laag' zijn (nu '{self.boundary}')."
+                f"Modelrand moet een van {', '.join(BOUNDARIES)} zijn (nu '{self.boundary}')."
             )
         n_nodes = len(self.stack.nodes) if not self.stack.errors() else 0
-        if self.boundary == "per_laag" and len(self.boundary_layers) != n_nodes:
-            errors.append(
-                f"Modelrand per laag: geef voor elk van de {n_nodes} rekenlagen een stijghoogte "
-                f"of 'gesloten' op (nu {len(self.boundary_layers)})."
-            )
+        if self.boundary == "per_laag":
+            if len(self.boundary_layers) != n_nodes or len(self.boundary_kinds) not in (
+                0, n_nodes,
+            ):  # fmt: skip
+                errors.append(
+                    f"Modelrand per laag: geef voor elk van de {n_nodes} rekenlagen een "
+                    f"randtype en stijghoogte op (nu {len(self.boundary_layers)})."
+                )
+            elif any(k not in RING_KINDS for k in self.boundary_kinds):
+                errors.append(f"Modelrand per laag: kies uit {', '.join(RING_KINDS)}.")
+            elif any(kind != "gesloten" and head is None for kind, head in ring_layers(self)):
+                errors.append("Modelrand per laag: een vaste of doorlopende rand heeft een peil.")
         for size, name in ((self.size_x, "Breedte"), (self.size_y, "Hoogte")):
             if abs(size / self.cell - round(size / self.cell)) > 1e-9:
                 errors.append(
@@ -501,12 +514,55 @@ def _wells(params: Params, sub: Subsoil, stage: str) -> list[FluxBoundary]:
     return out
 
 
-def _fixed_head(params: Params) -> float | tuple[float | None, ...] | None:
-    if params.boundary == "vast":
-        return params.boundary_head
+def ring_layers(params: Params) -> list[tuple[str, float | None]]:
+    """(kind, head) of the model boundary per node; kind in RING_KINDS."""
+    n = len(params.stack.nodes)
     if params.boundary == "per_laag":
-        return params.boundary_layers
-    return None
+        heads = list(params.boundary_layers)
+        kinds = list(params.boundary_kinds) or ["gesloten" if h is None else "vast" for h in heads]
+        return list(zip(kinds, heads, strict=True))
+    if params.boundary == "gesloten":
+        return [("gesloten", None)] * n
+    return [(params.boundary, params.boundary_head)] * n
+
+
+def _fixed_head(params: Params) -> tuple[float | None, ...]:
+    return tuple(h if kind == "vast" else None for kind, h in ring_layers(params))
+
+
+def _ring_ghb(params: Params, T: list[np.ndarray], c: list[np.ndarray]) -> HeadBoundary | None:
+    """GHB on the outer ring for layers with a continuing boundary: per outer cell face
+    C = T dy / (dx/2 + lambda), lambda = sqrt(T c_eff) of a semi-infinite leaky aquifer;
+    1/c_eff = sum of the conductances to the adjacent nodes (and the seepage boundary)."""
+    nl, nr, nc = len(T), params.nrow, params.ncol
+    idx = np.arange(nl * nr * nc).reshape(nl, nr, nc)
+    rr, cc = np.indices((nr, nc))
+    faces = (
+        (rr == 0).astype(int) + (rr == nr - 1) + (cc == 0) + (cc == nc - 1)
+    )  # outer faces per cell (corners 2)
+    ring = faces > 0
+    keys, cond, stage = [], [], []
+    for j, (kind, head) in enumerate(ring_layers(params)):
+        if kind != "doorlopend":
+            continue
+        leak = np.zeros((nr, nc))
+        if j > 0:
+            leak += 1.0 / np.broadcast_to(c[j - 1], (nr, nc))
+        if j < nl - 1:
+            leak += 1.0 / np.broadcast_to(c[j], (nr, nc))
+        if j == nl - 1 and params.seepage:
+            leak += 1.0 / params.seepage_resistance
+        t = np.broadcast_to(T[j], (nr, nc))
+        with np.errstate(divide="ignore"):
+            lam = np.sqrt(t / leak)  # infinite without leakage: no outflow (closed)
+        C = faces * t * params.cell / (0.5 * params.cell + lam)
+        keys.append(idx[j][ring])
+        cond.append(C[ring])
+        stage.append(np.full(int(ring.sum()), head))
+    if not keys:
+        return None
+    s = np.concatenate(stage)
+    return HeadBoundary(RING_GHB, "ghb", np.concatenate(keys), np.concatenate(cond), s, s)
 
 
 def compute(params: Params) -> Result:
@@ -518,6 +574,7 @@ def compute(params: Params) -> Result:
     zmap = zone_map(params)
     cond = _cell_conductances(params, sub)
     fixed = _fixed_head(params)
+    ring_ghb = _ring_ghb(params, T, c)
     convertible = _convertible(params)
 
     # Both runs share the grid matrix; the opzet run starts from the reference states.
@@ -529,7 +586,8 @@ def compute(params: Params) -> Result:
         return solve_grid(
             T if start is None else list(start.transmissivity),
             c, params.nrow, params.ncol, params.cell, params.recharge,
-            _boundaries(params, sub, run, cond), fixed_head=fixed,
+            _boundaries(params, sub, run, cond) + ([ring_ghb] if ring_ghb else []),
+            fixed_head=fixed,
             fluxes=_wells(params, sub, run) if with_wells else (),
             initial_active=None if start is None else start.active,
             factorization=factorization, convertible=convertible,
@@ -549,7 +607,7 @@ def compute(params: Params) -> Result:
         rows.append("kwel onderrand")
     if params.drain_cells:
         rows.append("buisdrainage")
-    rows += ["maaiveld", "rand"]
+    rows += ["maaiveld", *([RING_GHB] if ring_ghb else []), "rand"]
 
     def column(s) -> list[float]:
         vals = [s.recharge] + [s.fluxes[name] for name in rows[1:-1]] + [s.lateral]
