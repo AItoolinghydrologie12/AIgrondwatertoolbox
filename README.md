@@ -125,7 +125,15 @@ de app onder **Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`)
 - Geen stroming *langs* scheidende lagen en geen verticale stroming binnen een pakket buiten
   de ½D/kv-term: elk pakket is één laag (Dupuit). Bij partieel doordringende watergangen
   vangt de radiale weerstand dat op.
-- De transmissiviteit verandert niet met de grondwaterstand.
+- **Vaste transmissiviteit.** T = kh · D rekent met de ingevoerde laagdikte D, ook voor het
+  freatische pakket. In werkelijkheid voert daar alleen het verzadigde deel water
+  (grondwaterstand − onderkant laag): stijgt de grondwaterstand, dan wordt T groter; daalt
+  hij, dan kleiner, tot droogvallen toe. MODFLOW 6 kan dat met een "convertible" laag
+  (ICELLTYPE, T = k · (h − bodem), Newton-methode). Gevolgen:
+  - **peilopzet**: meestal klein, bv. 0,2 m verhoging op 5 m freatisch pakket ≈ 4 % meer T;
+  - **deklaag als bovenkant**: verwaarloosbaar, de T van de klei is al heel klein;
+  - **putten in de freatische laag**: de werkelijke verlaging is groter dan berekend; bij een
+    verlaging van meer dan 25 % van de laagdikte waarschuwt de app.
 - De uitwisseling met watergangen rekent de app zelf uit (Ernst/De Lange). In MODFLOW hangt
   dit helemaal af van wat de modelleur als conductance invult.
 
