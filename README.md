@@ -114,7 +114,7 @@ de app onder **Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`)
 | Watergangen | RIV of DRN: q = C(h_peil − h), RIV begrensd op de bodem | RIV / DRN, zelfde formules |
 | Conductance watergang | **berekend door de app**: natte omtrek per laag, intreeweerstand, radiale weerstand (Ernst), strookweerstand bij een bodem in klei, celgrootte-correctie (De Lange) | moet de gebruiker zelf opgeven |
 | Buisdrainage, maaivelddrainage | DRN op drainniveau resp. maaiveld | DRN |
-| Putten | vast debiet per cel en laag | WEL |
+| Putten | vast debiet per cel en laag; stijghoogte in de put met Peaceman | WEL (stijghoogte in de put: MAW) |
 | Vaste peilen met weerstand, kwel | GHB per celgroep; kwel als GHB op de onderste laag | GHB |
 | Modelrand | buitenste ring vaste stijghoogte, doorlopend pakket (GHB met C = T·Δy/(Δx/2 + λ)) of gesloten, ook per laag | CHD, GHB (conductance zelf bepalen) of geen-stroming |
 | Aan/uit van RIV/DRN | Picard-iteratie tot geen toestand meer wisselt | idem, binnen de buitenste iteraties van IMS |
@@ -204,10 +204,13 @@ de app onder **Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`)
   en benadert per laag een half oneindig lekkend pakket (spreidingslengte λ); een laag zonder
   lekkage krijgt zo een gesloten rand. Test: 1 km-model wijkt 1,1 cm af van een groot model
   bij 0,2 m opzet (vaste rand 18 cm). Leg de rand ver genoeg van de opzet.
-- **Putten** (WEL): vast debiet per cel en laag, apart voor referentie en opzet. De
-  stijghoogte bij een put is een celgemiddelde (niet de putstijghoogte). Bij een verlaging van
-  meer dan 25 % van de freatische laagdikte waarschuwt de app (T blijft vast). Validatie: De
-  Glee binnen 2 % vanaf 3 cellen van de put.
+- **Putten** (WEL): vast debiet per cel en laag, apart voor referentie en opzet. De kaart
+  toont het celgemiddelde; de tabel *Putten* geeft ook de stijghoogte in de put (Peaceman,
+  met putstraal), binnen 1 % van De Glee bij cellen van 10–50 m. Zonder putweerstand (skin)
+  en partiële filterlengte. Validatie celgemiddelde: De Glee binnen 2 % vanaf 3 cellen van
+  de put. Met vaste T waarschuwt de app bij een verlaging van meer dan 25 % van de
+  freatische laagdikte. Een debiet wordt niet automatisch verlaagd als cellen droogvallen
+  (zoals MODFLOW 6 zonder AUTO_FLOW_REDUCE).
 - **GHB-groepen** en **kwel-onderrand**: q = A/c (h_ext − h), altijd actief. Het kwelpeil φ is
   gelijk in referentie en opzet.
 - Watergangen teken je als **lijn** (klikpunten op een hulprooster van cel/5); de lengte per

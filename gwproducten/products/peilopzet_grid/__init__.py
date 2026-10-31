@@ -81,6 +81,7 @@ class WellGroup:
     layer: str = "freatisch"
     q_ref: float = param(0.0, "m³/d", "Debiet per put referentie (+ = onttrekking)", -1e5, 1e5)
     q_new: float = param(0.0, "m³/d", "Debiet per put na opzet (+ = onttrekking)", -1e5, 1e5)
+    radius: float = param(0.15, "m", "Putstraal", 0.01, 2.0)
 
 
 @dataclass(frozen=True)
@@ -389,6 +390,46 @@ class Result:
     surface: np.ndarray  # (nrow, ncol) surface level [m NAP]
     zone_names: list[str]  # per zone index, "basis" first
     well_drawdown: np.ndarray | None = None  # (n_nodes, nrow, ncol) by the wells (opzet) [m]
+    wells: pd.DataFrame | None = None  # per well: cell average and head in the well
+
+
+PEACEMAN = 0.198  # equivalent radius r_e / dx of a well in a square cell (isotropic)
+
+
+def well_correction(q: float, T: float, cell: float, radius: float) -> float:
+    """Head in the well minus the cell head [m] (Peaceman 1978): -Q/(2 pi T) ln(r_e/r_w),
+    r_e = 0.198 dx; ``q`` > 0 = extraction."""
+    return -q / (2 * np.pi * T) * np.log(PEACEMAN * cell / radius)
+
+
+def _well_table(params: Params, nodes, geometry, ref, new, drawdown) -> pd.DataFrame:
+    """Per well cell: drawdown (cell average and in the well) and the head in the well."""
+    keys = [n.key for n in nodes]
+    rows = []
+    for g in params.wells:
+        j = keys.index(g.layer)
+        for r, c in g.cells:
+            dry = bool(new.dry[j, r, c] or ref.dry[j, r, c])
+            T_ref, T_new = ref.transmissivity[j, r, c], new.transmissivity[j, r, c]
+            h_ref = ref.heads[j, r, c] + well_correction(g.q_ref, T_ref, params.cell, g.radius)
+            h_new = new.heads[j, r, c] + well_correction(g.q_new, T_new, params.cell, g.radius)
+            s_cell = float(drawdown[j, r, c]) if drawdown is not None else np.nan
+            s_well = s_cell - well_correction(g.q_new, T_new, params.cell, g.radius)
+            rows.append(
+                {
+                    "Put": g.name,
+                    "Laag": nodes[j].label,
+                    "Cel (rij, kolom)": f"{r}, {c}",
+                    "Q opzet [m³/d]": g.q_new,
+                    "Verlaging cel [m]": s_cell,
+                    "Verlaging in put [m]": np.nan if dry else s_well,
+                    "h put ref [m NAP]": np.nan if dry else h_ref,
+                    "h put opzet [m NAP]": np.nan if dry else h_new,
+                    "Onderkant laag [m NAP]": float(geometry[j][2][r, c]),
+                    "Droog": dry,
+                }
+            )
+    return pd.DataFrame(rows)
 
 
 def _cell_conductances(
@@ -744,6 +785,15 @@ def compute(params: Params) -> Result:
                     f"({thick:g} m). De transmissiviteit blijft in het model vast; de werkelijke "
                     "verlaging is dan groter."
                 )
+    wells = None
+    if params.wells:
+        wells = _well_table(params, nodes, geometry, ref, new, well_drawdown)
+        low = wells[wells["h put opzet [m NAP]"] < wells["Onderkant laag [m NAP]"]]
+        for name in dict.fromkeys(low["Put"]):
+            warnings.append(
+                f"{name}: de stijghoogte in de put (Peaceman, putstraal) ligt onder de "
+                "onderkant van de laag; dit debiet is met deze put niet haalbaar."
+            )
 
     x = (np.arange(params.ncol) + 0.5) * params.cell
     y = (np.arange(params.nrow) + 0.5) * params.cell
@@ -764,6 +814,7 @@ def compute(params: Params) -> Result:
         surface=surface_map(params),
         zone_names=zone_names,
         well_drawdown=well_drawdown,
+        wells=wells,
     )
 
 
