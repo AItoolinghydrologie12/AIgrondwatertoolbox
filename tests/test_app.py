@@ -569,3 +569,22 @@ def test_grid_product_subsoil_from_regis(monkeypatch: pytest.MonkeyPatch) -> Non
     assert not at.error, [e.value for e in at.error]
     stack = at.session_state["p3_result"]["params"].stack
     assert stack.top_mode == "deklaag" and sum(lay.kind == "pakket" for lay in stack.layers) == 2
+
+
+def test_budget_figure_posts_and_sign() -> None:
+    import sys
+
+    import pandas as pd
+
+    sys.path.insert(0, str(APP))
+    from result_ui import budget_figure
+
+    budget = pd.DataFrame(
+        {"referentie [m³/d]": [722.0, -77.4, 0.0, -644.6, 1e-9],
+         "opzet [m³/d]": [722.0, -44.3, 0.0, -677.7, 1e-9]},
+        index=["neerslag", "Wetering", "maaiveld", "rand", "som (balansfout)"],
+    )  # fmt: skip
+    fig = budget_figure(budget)
+    assert [t.name for t in fig.data] == ["referentie", "opzet"]
+    assert list(fig.data[1].y) == ["rand", "Wetering", "neerslag"]  # no zero post, no sum
+    assert list(fig.data[1].x) == [-677.7, -44.3, 722.0]
