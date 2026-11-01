@@ -77,6 +77,7 @@ JPEG_QUALITY = 75
 WMS = {
     "luchtfoto": ("https://service.pdok.nl/hwh/luchtfotorgb/wms/v1_0", "Actueel_ortho25"),
     "top10nl": ("https://service.pdok.nl/brt/top10nl/wms/v1_0", "top10nl"),
+    "ahn": ("https://service.pdok.nl/rws/ahn/wms/v1_0", "dtm_05m"),
 }
 BGT_TILES = (
     "https://service.pdok.nl/kadaster/bgt/wmts/v1_0/achtergrondvisualisatie/EPSG:28992/"
@@ -92,6 +93,7 @@ BACKGROUND_SOURCE = {
     "luchtfoto": "Luchtfoto: Beeldmateriaal Nederland (CC BY 4.0) via PDOK",
     "top10nl": "Topografie: Kadaster BRT TOP10NL (CC BY 4.0) via PDOK",
     "bgt": "BGT: Basisregistratie Grootschalige Topografie via PDOK",
+    "ahn": "Hoogtekaart: AHN (CC0) via PDOK",
 }
 
 Bbox = tuple[float, float, float, float]  # x_min, y_min, x_max, y_max in RD [m]

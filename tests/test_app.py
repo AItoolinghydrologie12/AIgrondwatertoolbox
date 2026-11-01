@@ -445,6 +445,7 @@ def test_grid_product_location_sets_rd_origin() -> None:
     at.number_input(key="p3_cy").set_value(455900.0).run()
     at.button(key="p3_calc").click().run()
     assert not at.exception, [e.value for e in at.exception]
+    assert not at.error, [e.value for e in at.error]
     params = at.session_state["p3_result"]["params"]
     assert (params.origin_x, params.origin_y) == (136300.0, 455400.0)  # centre - 500 m
     saved = export_project(at.session_state, "p3")["invoer"]
@@ -504,3 +505,36 @@ def test_grid_product_top10nl_import(monkeypatch: pytest.MonkeyPatch) -> None:
     at.button(key="p3_calc").click().run()
     assert not at.exception, [e.value for e in at.exception]
     assert len(at.session_state["p3_result"]["params"].watercourses) == 3
+
+
+def test_grid_product_surface_from_ahn(monkeypatch: pytest.MonkeyPatch) -> None:
+    """AHN (mocked): the model gets the median of all cells, a zone the median of its own
+    cells; values go into the surface inputs of step 1."""
+    import numpy as np
+
+    from gwproducten.geo import ahn
+
+    def fake(bbox: tuple, nrow: int, ncol: int) -> np.ndarray:
+        values = np.full((nrow, ncol), -1.0)
+        values[:5, :5] = 2.0  # south-west corner higher
+        return values
+
+    monkeypatch.setattr(ahn, "surface_per_cell", fake)
+    page = str(APP / "pages" / "1_Grondwatertoolbox.py")
+    at = AppTest.from_file(page, default_timeout=120).run()
+    at.button(key="p3_clear").click().run()  # the example ditches lie above this surface
+    at.button(key="p3_zone_add").click().run()
+    zones = at.session_state["p3_zones"]
+    zones[0]["points"] = {(12.5, 12.5), (37.5, 37.5)}  # two cells in the corner
+    at.session_state["p3_zones"] = zones
+    at.toggle(key="p3_geo").set_value(True).run()
+    at.button(key="p3_ahn_get").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    at.button(key="p3_ahn_use").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.number_input(key="p3_mv").value == -1.0
+    assert at.number_input(key="p3_z1_mv").value == 2.0
+    at.button(key="p3_calc").click().run()
+    assert not at.error, [e.value for e in at.error]
+    params = at.session_state["p3_result"]["params"]
+    assert params.surface == -1.0 and params.zones[0].surface == 2.0

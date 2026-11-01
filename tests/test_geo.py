@@ -148,3 +148,47 @@ def test_wms_error_document_gives_message(monkeypatch: pytest.MonkeyPatch) -> No
 def test_online_background(kind: str) -> None:
     data = pdok.background_image(kind, (136300.0, 455400.0, 137300.0, 456400.0))
     assert data[:2] == b"\xff\xd8" and 20_000 < len(data) < 600_000  # a real JPEG map
+
+
+# ---- AHN surface level ----------------------------------------------------------------------
+def test_ahn_cell_medians_orientation_and_nodata() -> None:
+    """Raster rows run north to south, app rows south to north; no-data cells become NaN."""
+    import numpy as np
+
+    from gwproducten.geo import ahn
+
+    n = ahn.SAMPLES
+    raster = np.zeros((2 * n, 3 * n))
+    raster[:n, :] = 5.0  # northern row of cells
+    raster[n:, :] = 1.0
+    raster[n:, 2 * n :] = np.nan  # south-east cell without data
+    raster[0, 0] = 100.0  # one outlier (a building) does not move the median
+    med = ahn.cell_medians(raster, 2, 3)
+    assert med[1].tolist() == [5.0, 5.0, 5.0]  # app row 1 = north
+    assert med[0, :2].tolist() == [1.0, 1.0] and np.isnan(med[0, 2])
+    s = ahn.stats(med)
+    assert s is not None and s.coverage == pytest.approx(5 / 6) and s.median == 5.0
+    assert ahn.stats(np.full((2, 2), np.nan)) is None
+
+
+def test_ahn_saved_response() -> None:
+    from gwproducten.geo import ahn
+
+    bbox = (127500.0, 445500.0, 128500.0, 446500.0)
+    raster = ahn.read_tiff((DATA / "ahn_lopik_4x4.tif").read_bytes(), bbox)
+    assert raster.shape == (20, 20)
+    s = ahn.stats(ahn.cell_medians(raster, 4, 4))
+    assert s is not None and -1.3 < s.median < -0.8  # Lopikerwaard polder
+    with pytest.raises(pdok.ServiceError, match="niet op het modelgebied"):
+        ahn.read_tiff((DATA / "ahn_lopik_4x4.tif").read_bytes(), (0.0, 0.0, 1000.0, 1000.0))
+    with pytest.raises(pdok.ServiceError, match="geen hoogtekaart"):
+        ahn.read_tiff(b"<ExceptionReport/>", bbox)
+
+
+@pytest.mark.online
+def test_online_ahn() -> None:
+    from gwproducten.geo import ahn
+
+    values = ahn.surface_per_cell((127500.0, 445500.0, 128500.0, 446500.0), 40, 40)
+    s = ahn.stats(values)
+    assert s is not None and s.coverage > 0.9 and -2.0 < s.median < 0.0
