@@ -4,6 +4,7 @@ calculation itself stays in local metres."""
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 import streamlit as st
@@ -73,3 +74,52 @@ def location_inputs(values: dict[str, Any]) -> None:
             f"({x0 + values['size_x']:.0f}; {y0 + values['size_y']:.0f}) m. Adreszoeker: "
             "PDOK Locatieserver."
         )
+
+
+BACKGROUNDS = {
+    "geen": "geen",
+    "top10nl": "topografie (TOP10NL)",
+    "luchtfoto": "luchtfoto",
+    "bgt": "BGT (tot ~1,2 km, trager)",
+}
+
+
+@st.cache_data(ttl=7 * 24 * 3600, max_entries=20, show_spinner="Kaart ophalen bij PDOK…")
+def _background_uri(kind: str, bbox: pdok.Bbox) -> str:
+    data = pdok.background_image(kind, bbox)
+    return "data:image/jpeg;base64," + base64.b64encode(data).decode()
+
+
+def model_bbox(origin_x: float, origin_y: float, width: float, height: float) -> pdok.Bbox:
+    return (origin_x, origin_y, origin_x + width, origin_y + height)
+
+
+def background(bbox: pdok.Bbox) -> tuple[str, float] | None:
+    """The chosen background map for ``bbox`` as (data URI, opacity), or None (no location,
+    'geen', or the service failed; a warning is shown then)."""
+    kind = ss.get(f"{KEY}_bg", "geen")
+    if not located() or kind == "geen":
+        return None
+    try:
+        uri = _background_uri(kind, bbox)
+    except pdok.ServiceError as err:
+        st.warning(str(err))
+        return None
+    return uri, float(ss.get(f"{KEY}_bg_op", 0.6))
+
+
+def background_inputs() -> None:
+    """Choice of background map and its opacity (only with a location)."""
+    if not located():
+        st.caption("Achtergrondkaart: zet bij stap 1 een locatie aan.")
+        return
+    c1, c2 = st.columns([3, 2])
+    c1.selectbox("Achtergrondkaart", list(BACKGROUNDS), format_func=BACKGROUNDS.get,
+                 key=f"{KEY}_bg")  # fmt: skip
+    c2.slider("Zichtbaarheid", 0.1, 1.0, 0.6, 0.1, key=f"{KEY}_bg_op")
+
+
+def background_caption() -> None:
+    kind = ss.get(f"{KEY}_bg", "geen")
+    if located() and kind in pdok.BACKGROUND_SOURCE:
+        st.caption(f"Achtergrond: {pdok.BACKGROUND_SOURCE[kind]}.")

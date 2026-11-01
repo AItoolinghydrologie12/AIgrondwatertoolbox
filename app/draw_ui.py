@@ -11,7 +11,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from draw_actions import NEW, apply_selection
-from grid_ui import centre_key, drawing_figure
+from grid_ui import add_background, centre_key, drawing_figure
+from location_ui import background, background_caption, background_inputs, model_bbox
 from streamlit.errors import StreamlitAPIException
 from toolbox_state import DEFAULT_RADIUS, KEY, MAP_CONFIG, Grid, bump, example, reset, ss
 
@@ -294,6 +295,8 @@ def draw_panel(
     Voorbeeld, Wissen) rerun the whole page."""
     cell, nrow, ncol = grid.cell, grid.nrow, grid.ncol
     col_map, col_ctl = st.columns([3, 2])
+    with col_map:
+        background_inputs()
     with col_ctl:
         obj = st.radio(
             "Wat teken je?", list(OBJECTS), format_func=OBJECTS.get, horizontal=True,
@@ -318,6 +321,9 @@ def draw_panel(
             current_line=ss[f"{KEY}_line"], snap=snap, wells=grid.groups("wells"),
             ghbs=grid.groups("ghb"), zones=grid.zones(zone_values),
         )  # fmt: skip
+        width, height = ncol * cell, nrow * cell
+        bbox = model_bbox(values["origin_x"], values["origin_y"], width, height)
+        add_background(fig_draw, background(bbox), width, height)
         ss[f"{KEY}_fig_draw"] = fig_draw
         # A stable key keeps zoom and pan between reruns; each selection is used only once
         # (``fresh``) instead of clearing it with a new key.
@@ -326,6 +332,7 @@ def draw_panel(
             fig_draw, key=draw_key, on_select="rerun", config=MAP_CONFIG, width="stretch",
             selection_mode=("points",) if line_mode else ("box", "lasso"),
         )  # fmt: skip
+        background_caption()
         target_curve = len(fig_draw.data) - 1
         picked = [
             (float(p["x"]), float(p["y"]))

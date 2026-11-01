@@ -10,7 +10,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from engine_ui import engine_badge, model_zip
-from grid_ui import result_figure
+from grid_ui import add_background, result_figure
+from location_ui import background, background_caption, model_bbox
 from profile_ui import crossings, profile_figure, profile_table
 from toolbox_state import KEY, MAP_CONFIG, ss
 from ui_common import TABS, csv_button, dict_table, png_buttons, split_theory
@@ -142,11 +143,16 @@ def show_result(
         profile=pts, click_snap=snap if clicking else None,
         wells=[{"name": g.name, "cells": g.cells} for g in params.wells],
     )  # fmt: skip
+    bg = background(model_bbox(params.origin_x, params.origin_y, params.size_x, params.size_y))
+    if bg is not None:
+        fig_res.update_traces(opacity=0.7, selector={"type": "contour"})  # map shows through
+        add_background(fig_res, bg, params.size_x, params.size_y)
     with map_box:
         event = st.plotly_chart(
             fig_res, width="stretch", key=f"{KEY}_resmap_{clicking}", config=MAP_CONFIG,
             on_select="rerun" if clicking else "ignore", selection_mode=("points",),
         )  # fmt: skip
+        background_caption()
         if view == "verhoging":
             st.caption(
                 f"Dikke rode lijn: {params.threshold * 100:.0f} cm-grens. "

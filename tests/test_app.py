@@ -449,3 +449,26 @@ def test_grid_product_location_sets_rd_origin() -> None:
     assert (params.origin_x, params.origin_y) == (136300.0, 455400.0)  # centre - 500 m
     saved = export_project(at.session_state, "p3")["invoer"]
     assert saved["geo"] is True and saved["cx"] == 136800.0 and saved["cy"] == 455900.0
+
+
+def test_grid_product_background_map(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With a location and a background choice both maps get the image (service mocked)."""
+    from gwproducten.geo import pdok
+
+    seen = []
+
+    def fake_image(kind: str, bbox: tuple) -> bytes:
+        seen.append((kind, bbox))
+        return b"\xff\xd8fake"
+
+    monkeypatch.setattr(pdok, "background_image", fake_image)
+    page = str(APP / "pages" / "1_Grondwatertoolbox.py")
+    at = AppTest.from_file(page, default_timeout=120).run()
+    at.toggle(key="p3_geo").set_value(True).run()
+    at.number_input(key="p3_cx").set_value(120500.0).run()
+    at.selectbox(key="p3_bg").set_value("luchtfoto").run()
+    at.button(key="p3_calc").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert ("luchtfoto", (120000.0, 462500.0, 121000.0, 463500.0)) in seen
+    assert at.session_state["p3_fig_draw"].layout.images[0].source.startswith("data:image/jpeg")
+    assert any("Beeldmateriaal" in c.value for c in at.caption)
