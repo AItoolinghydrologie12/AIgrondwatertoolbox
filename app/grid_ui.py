@@ -281,6 +281,19 @@ def result_figure(
     return fig
 
 
+def add_background(
+    fig: go.Figure, background: tuple[str, float] | None, width: float, height: float
+) -> None:
+    """Map image (data URI, opacity) under the traces, stretched over the model area."""
+    if background is None:
+        return
+    uri, opacity = background
+    fig.add_layout_image(
+        source=uri, xref="x", yref="y", x=0.0, y=height, sizex=width, sizey=height,
+        sizing="stretch", layer="below", opacity=opacity,
+    )  # fmt: skip
+
+
 def _f4(a: np.ndarray) -> np.ndarray:
     """Flattened float32 copy: sent to the browser as half the bytes of float64."""
     return np.ravel(a).astype(np.float32)
