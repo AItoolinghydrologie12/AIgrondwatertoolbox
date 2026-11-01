@@ -51,3 +51,20 @@ def test_zone_new_moves_cells_and_remove() -> None:
     assert z1["points"] == centres((1, 1)) and z2["points"] == centres((1, 2))  # moved
     apply_selection(st, KEY, GRID, "zone", "verwijderen", None, {}, centres((1, 1), (1, 2)))
     assert not z1["points"] and not z2["points"]
+
+
+def test_wall_around_a_selection_and_on_another_grid() -> None:
+    """A wall around 2 x 2 cells: 8 faces; stored in metres, so on a 12.5 m grid the same
+    outline gives 16 faces."""
+    from grid_ui import wall_faces
+
+    st = empty_state() | {"p3_walls": []}
+    props = {"name": "bouwput", "layer": "pakket1", "impermeable": True, "reference": False}
+    apply_selection(
+        st, KEY, GRID, "damwand", "rondom", NEW, props, centres((5, 5), (5, 6), (6, 5), (6, 6))
+    )
+    (wall,) = st["p3_walls"]
+    assert len(wall_faces(wall, 25.0, 40, 40)) == 8
+    assert len(wall_faces(wall, 12.5, 80, 80)) == 16
+    apply_selection(st, KEY, GRID, "damwand", "rondom", "bouwput", {}, centres((20, 20)))
+    assert len(wall_faces(st["p3_walls"][0], 25.0, 40, 40)) == 12

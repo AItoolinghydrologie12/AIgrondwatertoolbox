@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections.abc import MutableMapping
 from typing import Any
 
-from grid_ui import centre_key, to_cells, wc_geometry
+from grid_ui import centre_key, outline_lines, to_cells, wc_geometry
 
 NEW = "__nieuw__"
 
@@ -34,8 +34,9 @@ def apply_selection(
 ) -> None:
     """Apply a box/lasso selection to the chosen object.
 
-    ``obj``: watergang, drain, put, ghb or zone; ``how``: cellen/wissen (watergang) or
-    toevoegen/verwijderen; ``target``: watercourse name or zone id, or :data:`NEW`;
+    ``obj``: watergang, drain, put, ghb, damwand or zone; ``how``: cellen/wissen
+    (watergang), rondom (damwand around the selection) or toevoegen/verwijderen; ``target``:
+    watercourse or wall name, or zone id, or :data:`NEW`;
     ``grid``: (cell, nrow, ncol)."""
     cell, nrow, ncol = grid
     wcs = state[f"{key}_wcs"]
@@ -66,6 +67,12 @@ def apply_selection(
             for g in state[f"{key}_{name}"]:
                 g["points"] -= selected
             state[f"{key}_{name}"] = [g for g in state[f"{key}_{name}"] if g["points"]]
+    elif obj == "damwand":
+        lines = outline_lines(selected, cell, nrow, ncol)
+        if target == NEW:
+            state[f"{key}_walls"].append({**props, "lines": lines})
+        else:
+            next(w for w in state[f"{key}_walls"] if w["name"] == target)["lines"] += lines
     elif obj == "zone":
         if how == "toevoegen" and target == NEW:
             target = new_zone(state, key)

@@ -41,3 +41,16 @@ def test_profile_table_and_crossings_on_a_grid() -> None:
     assert len(found) == 1
     assert found[0].name == "sloot"
     assert 100.0 <= found[0].distance <= 125.0
+
+
+def test_profile_crosses_a_wall() -> None:
+    """A horizontal profile at y = 112.5 m over a wall on the east face of column 3 (x = 100
+    m, cells 25 m): one crossing at about 100 m along the line."""
+    from types import SimpleNamespace
+
+    from profile_ui import sample_line, wall_crossings
+
+    d, xs, ys = sample_line([(0.0, 112.5), (250.0, 112.5)], 25.0 / 4)
+    wall = SimpleNamespace(name="w", faces=((4, 3, "x"), (5, 3, "x")))
+    ((name, dist),) = wall_crossings(d, xs, ys, 25.0, [wall])
+    assert name == "w" and abs(dist - 100.0) < 25.0 / 4

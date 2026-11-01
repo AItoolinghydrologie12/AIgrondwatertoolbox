@@ -79,6 +79,26 @@ def crossings(
     return sorted(out, key=lambda c: c.distance)
 
 
+def wall_crossings(
+    distance: np.ndarray, xs: np.ndarray, ys: np.ndarray, cell: float, walls: list[Any]
+) -> list[tuple[str, float]]:
+    """(wall name, distance) where the profile passes a face of a wall: two successive
+    samples in neighbouring cells on both sides of that face."""
+    r = (ys // cell).astype(int)
+    c = (xs // cell).astype(int)
+    out = []
+    for w in walls:
+        faces = set(w.faces)
+        for k in range(len(distance) - 1):
+            (r0, c0), (r1, c1) = (r[k], c[k]), (r[k + 1], c[k + 1])
+            if abs(r1 - r0) + abs(c1 - c0) != 1:
+                continue
+            face = (min(r0, r1), min(c0, c1), "x" if r0 == r1 else "y")
+            if face in faces:
+                out.append((w.name, float(0.5 * (distance[k] + distance[k + 1]))))
+    return sorted(out, key=lambda item: item[1])
+
+
 def profile_table(
     points: list[tuple[float, float]],
     x: np.ndarray,
@@ -111,9 +131,10 @@ def profile_figure(
     node_labels: dict[str, str],
     crossed: list[Crossing],
     threshold: float,
+    walls: list[tuple[str, float]] = (),  # type: ignore[assignment]
 ) -> go.Figure:
     """Heads (ref dashed, opzet solid) per layer and the surface; rise of the top layer on
-    the second axis; crossed watercourses with their levels."""
+    the second axis; crossed watercourses with their levels and crossed walls."""
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     d = df["afstand [m]"]
     labels = list(node_labels.values())
@@ -166,6 +187,12 @@ def profile_figure(
         fig.add_annotation(
             x=c.distance, y=1.0, yref="paper", text=c.name, showarrow=False, textangle=-30,
             font={"size": 11}, yanchor="bottom",
+        )  # fmt: skip
+    for name, dist in walls:
+        fig.add_vline(x=dist, line={"color": "black", "width": 4})
+        fig.add_annotation(
+            x=dist, y=0.0, yref="paper", text=f"{name} (damwand)", showarrow=False,
+            textangle=-90, font={"size": 11}, xanchor="right", yanchor="bottom",
         )  # fmt: skip
     rise_max = max(float(np.nanmax(df[f"verhoging {top} [m]"])), threshold)
     fig.update_yaxes(title_text="stijghoogte [m NAP]", secondary_y=False)
