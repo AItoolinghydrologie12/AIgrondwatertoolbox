@@ -538,3 +538,34 @@ def test_grid_product_surface_from_ahn(monkeypatch: pytest.MonkeyPatch) -> None:
     assert not at.error, [e.value for e in at.error]
     params = at.session_state["p3_result"]["params"]
     assert params.surface == -1.0 and params.zones[0].surface == 2.0
+
+
+def test_grid_product_subsoil_from_regis(monkeypatch: pytest.MonkeyPatch) -> None:
+    """REGIS (saved reply): the proposal is shown first and only 'Overnemen' changes the
+    layer inputs; the Holocene top keeps its resistance; the model computes."""
+    from gwproducten.geo import regis
+
+    text = (Path(__file__).parent / "data" / "regis_lopik.ascii").read_text(encoding="utf-8")
+    monkeypatch.setattr(regis, "fetch_point", lambda x, y: regis.parse_ascii(text))
+    page = str(APP / "pages" / "1_Grondwatertoolbox.py")
+    at = AppTest.from_file(page, default_timeout=120).run()
+    at.toggle(key="p3_geo").set_value(True).run()
+    at.number_input(key="p3_rg_nmax").set_value(2).run()
+    at.button(key="p3_rg_get").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.radio(key="p3_mode_top").value == "freatisch_zand"  # not changed yet
+    at.button(key="p3_rg_use").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.radio(key="p3_mode_top").value == "deklaag"
+    assert at.number_input(key="p3_naq_deklaag").value == 2
+    assert at.number_input(key="p3_deklaag_0_d").value == pytest.approx(8.42, abs=0.01)
+    assert at.number_input(key="p3_deklaag_1_k").value * at.number_input(
+        key="p3_deklaag_1_d"
+    ).value == pytest.approx(2562, rel=0.01)
+    assert at.number_input(key="p3_deklaag_2_c").value == pytest.approx(160, abs=1)
+    at.number_input(key="p3_mv").set_value(-0.84).run()
+    at.button(key="p3_clear").click().run()
+    at.button(key="p3_calc").click().run()
+    assert not at.error, [e.value for e in at.error]
+    stack = at.session_state["p3_result"]["params"].stack
+    assert stack.top_mode == "deklaag" and sum(lay.kind == "pakket" for lay in stack.layers) == 2
