@@ -111,6 +111,36 @@ def profile_points(params: p3.Params) -> list[tuple[float, float]]:
     return list(pts)
 
 
+BUDGET_COLORS = {"referentie": "#86b6ef", "opzet": "#256abf"}  # one blue, light -> dark
+BUDGET_MIN = 1e-3  # m³/d; smaller posts (e.g. no surface runoff) are left out of the figure
+
+
+def budget_figure(budget: pd.DataFrame) -> go.Figure:
+    """Water balance per post as horizontal bars around zero, reference next to opzet.
+    Positive = into the groundwater."""
+    table = budget.drop(index=[i for i in budget.index if str(i).startswith("som")])
+    table = table[(table.abs() > BUDGET_MIN).any(axis=1)].iloc[::-1]  # first post on top
+    fig = go.Figure()
+    for col, (name, colour) in zip(table.columns, BUDGET_COLORS.items(), strict=True):
+        fig.add_trace(
+            go.Bar(
+                y=[str(i) for i in table.index], x=table[col], orientation="h", name=name,
+                marker={"color": colour}, hovertemplate=f"%{{y}} ({name}): %{{x:.1f}} m³/d"
+                "<extra></extra>",
+            )
+        )  # fmt: skip
+    fig.add_vline(x=0.0, line={"color": "#898781", "width": 1})
+    fig.update_layout(
+        barmode="group", bargap=0.35, bargroupgap=0.08, barcornerradius=4,
+        height=90 + 48 * len(table), margin={"t": 10, "b": 40, "l": 10, "r": 10},
+        xaxis={"title": "← uit het grondwater · in het grondwater → [m³/d]",
+               "zeroline": False, "gridcolor": "#e1e0d9"},
+        legend={"orientation": "h", "y": 1.02, "yanchor": "bottom"},
+        plot_bgcolor="rgba(0,0,0,0)",
+    )  # fmt: skip
+    return fig
+
+
 def show_result(
     params: p3.Params, res: p3.Result, wcs_done: list[dict[str, Any]]
 ) -> tuple[go.Figure, go.Figure | None, pd.DataFrame | None]:
@@ -195,6 +225,7 @@ def show_result(
         )
     with st.expander("Waterbalans en conductances", expanded=False):
         st.markdown("**Waterbalans [m³/d]**")
+        st.plotly_chart(budget_figure(res.budget), width="stretch")
         st.dataframe(res.budget.round(2))
         st.caption(
             "Positief = water het grondwater in. 'rand' = in/uitstroom over de vaste modelrand."

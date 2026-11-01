@@ -43,6 +43,7 @@ dat een fout over het uitvoeringsbeleid, gebruik dan de volledige paden zoals hi
 | Wat | Commando | VS Code |
 |---|---|---|
 | Tests | `.venv\Scripts\python -m pytest` | taak **Tests**, of de testweergave |
+| Tests tegen de echte kaartdiensten (internet) | `.venv\Scripts\python -m pytest -m online` | – |
 | Lint | `.venv\Scripts\python -m ruff check .` | taak **Lint** |
 | Formatteren (controle) | `.venv\Scripts\python -m ruff format --check .` | taak **Lint** |
 | Formatteren | `.venv\Scripts\python -m ruff format .` | bij opslaan (ruff-extensie) |
@@ -73,6 +74,7 @@ gwproducten/            rekenkern (pip-installeerbaar, los van de UI)
   analytic/             meerlagen-eigenwaarde-oplossing, watergangconductance C', stroken-weerstand
   numeric/              rooster in bovenaanzicht (RIV/DRN), 1D eindige volumes, x-z doorsnede
   products/<product>/   META, Params, compute(), schematic(), theory.md
+  geo/                  kaartgegevens voor een locatie: PDOK (adres, kaarten, TOP10NL, AHN), REGIS II
 app/                    Streamlit: Home.py, pages/, gedeelde UI-bouwstenen
 tests/                  validatie per product + rooktest van alle pagina's
 ```
@@ -92,6 +94,7 @@ Validatie · Export*.
 | kaleido | PNG-export van figuren; heeft Chrome nodig (bij ontbreken: `plotly_get_chrome`, of gebruik het camera-icoon in de figuur) |
 | pytest, ruff | tests en lint/format (alleen ontwikkeling) |
 | flopy (+ matplotlib, vereist door flopy) | MODFLOW 6 als tweede rekenkern: modelbestanden schrijven, draaien en uitlezen |
+| requests, pillow | kaartgegevens voor een modellocatie (PDOK, REGIS): webverzoeken en kaartbeelden/AHN-raster; beide zaten al in de omgeving via streamlit |
 
 De app rekent standaard met een eigen solver; MODFLOW 6 (via flopy) is de tweede rekenkern en
 de referentie voor de tests.
@@ -261,6 +264,36 @@ product van en niet goedgekeurd door de USGS.
   cel volgt uit de lijn, dus ook gedeeltelijke cellen, diagonalen en bochten. Met
   rechthoek/lasso kies je volle cellen (plassen, buisdrainage). De lengte per cel is
   achteraf per cel aan te passen. Een watergang ligt rekenkundig altijd in het celmidden.
+- **Locatie en kaartgegevens** (optioneel, stap 1 → *Locatie*): adres zoeken (PDOK
+  Locatieserver) of RD-middelpunt invullen. Daarmee:
+  - **achtergrondkaart** onder teken- en resultaatkaart: topografie (BRT TOP10NL), luchtfoto
+    (Beeldmateriaal Nederland), BGT of AHN-hoogtekaart. BGT alleen tot ca. 1,2 × 1,2 km en
+    trager (4–6 s, tegels van PDOK); de andere kaarten < 1 s.
+  - **watergangen uit TOP10NL** (stap 2): hartlijnen 0,5–3 m en 3–6 m, vlakken > 6 m; duikers
+    vallen weg; breedte = midden van de breedteklasse; een vlak wordt lengte per cel =
+    oppervlak in de cel / breedte. **Peil en bodem staan niet in TOP10NL**: de app vult
+    standaardwaarden in (maaiveld − 1,2 / − 1,6 m) met een melding om ze in te vullen. Kleine
+    greppels ontbreken in TOP10NL. Geïmporteerde lijnen liggen in modelmeters: verschuif je
+    daarna de locatie, haal ze dan opnieuw op.
+  - **maaiveld uit AHN** (0,5 m): mediaan per cel (5 × 5 waarden), dan de mediaan voor het
+    model en per zone, met P10/P90. De app rekent met één maaiveld per zone.
+  - **ondergrond uit REGIS II** (TNO, 100 m-rooster, midden van het model): voorstel voor de
+    lagenopbouw (zand/kalk = pakket, klei/complex/veen = scheidende laag, dunne klei met
+    c < c_min telt mee in het pakket, kD en c blijven behouden, kv/kh 0,33 waar REGIS geen kv
+    heeft, max. 4 pakketten en daaronder een dichte basis). **REGIS geeft geen weerstand
+    voor de Holocene deklaag**: die blijft op de waarde in de app. Een regionaal model:
+    controleer met boringen. De REGIS-server (dinodata.nl) heeft geen
+    beschikbaarheidsgarantie; zonder internet werkt de app gewoon zonder kaartgegevens.
+  - het **MODFLOW 6-model** krijgt de RD-hoek linksonder (DIS XORIGIN/YORIGIN) en rij 1 is
+    de noordrand, zodat het model in GIS op zijn plek ligt.
+  - Bronnen en licenties staan onder elke kaart/tabel: PDOK (Fair Use, gratis, geen key),
+    Kadaster BRT TOP10NL en Beeldmateriaal Nederland (CC BY 4.0), AHN (CC0), REGIS II
+    (TNO-GDN, BRO). Elk verzoek betreft één modelgebied, met een timeout en de app-naam als
+    User-Agent; adressen worden niet bewaard (alleen de RD-coördinaat in je eigen project).
+- **Waterbalans** (stap 3 → *Waterbalans en conductances*): staafdiagram per post, referentie
+  naast opzet; positief = water het grondwater in.
+- **Tekenen** ververst alleen het tekenpaneel (Streamlit-fragment); bij 100 × 100 cellen gaat
+  per klik ca. 0,5 MB naar de browser (was 1,3 MB).
 - Invoer en tekeningen staan alleen in de browsersessie. Bewaar ze via de zijbalk →
   *Project opslaan of laden* (JSON-bestand met alle invoer, watergangen, buisdrainage,
   putten, GHB-groepen en zones) en laad ze later weer in.
