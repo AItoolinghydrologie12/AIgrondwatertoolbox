@@ -15,6 +15,7 @@ from grid_ui import add_background, centre_key, drawing_figure
 from location_ui import background, background_caption, background_inputs, model_bbox
 from streamlit.errors import StreamlitAPIException
 from toolbox_state import DEFAULT_RADIUS, KEY, MAP_CONFIG, Grid, bump, example, reset, ss
+from water_import_ui import import_inputs, import_notice
 
 from gwproducten.products import peilopzet_grid as p3
 
@@ -269,6 +270,8 @@ def draw_step(
         "*Toepassen*. Lichtere kleur = minder watergang in de cel."
     )
     draw_panel(grid, values, node_labels, zone_values)
+    import_inputs(grid, values)
+    import_notice()
     group_tables(node_labels)
     watercourse_tables(grid)
     return ss[f"{KEY}_fig_draw"]

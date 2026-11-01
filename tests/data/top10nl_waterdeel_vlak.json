@@ -1,0 +1,216 @@
+{
+ "type": "FeatureCollection",
+ "timeStamp": "2026-11-01T08:19:00Z",
+ "links": [
+  {
+   "rel": "self",
+   "title": "This document as GeoJSON",
+   "type": "application/geo+json",
+   "href": "https://api.pdok.nl/kadaster/brt-top10nl/ogc/v1/collections/waterdeel_vlak/items?bbox=127500%2C445500%2C128500%2C446500&bbox-crs=http%3A%2F%2Fwww.opengis.net%2Fdef%2Fcrs%2FEPSG%2F0%2F28992&crs=http%3A%2F%2Fwww.opengis.net%2Fdef%2Fcrs%2FEPSG%2F0%2F28992&f=json&limit=1000"
+  },
+  {
+   "rel": "alternate",
+   "title": "This document as JSON-FG",
+   "type": "application/vnd.ogc.fg+json",
+   "href": "https://api.pdok.nl/kadaster/brt-top10nl/ogc/v1/collections/waterdeel_vlak/items?bbox=127500%2C445500%2C128500%2C446500&bbox-crs=http%3A%2F%2Fwww.opengis.net%2Fdef%2Fcrs%2FEPSG%2F0%2F28992&crs=http%3A%2F%2Fwww.opengis.net%2Fdef%2Fcrs%2FEPSG%2F0%2F28992&f=jsonfg&limit=1000"
+  },
+  {
+   "rel": "alternate",
+   "title": "This document as HTML",
+   "type": "text/html",
+   "href": "https://api.pdok.nl/kadaster/brt-top10nl/ogc/v1/collections/waterdeel_vlak/items?bbox=127500%2C445500%2C128500%2C446500&bbox-crs=http%3A%2F%2Fwww.opengis.net%2Fdef%2Fcrs%2FEPSG%2F0%2F28992&crs=http%3A%2F%2Fwww.opengis.net%2Fdef%2Fcrs%2FEPSG%2F0%2F28992&f=html&limit=1000"
+  }
+ ],
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "breedteklasse": "6 - 12 meter",
+    "bronactualiteit": "2010-01-01",
+    "bronbeschrijving": "Een orthogerectificeerde fotografische opname van een deel van het aardoppervlak. Gemaakt vanuit een vliegtuig.",
+    "bronnauwkeurigheid": 0.1,
+    "brontype": "luchtfoto",
+    "brugnaam": null,
+    "functie": "overig",
+    "fysiekvoorkomen": null,
+    "getijdeinvloed": "nee",
+    "hoofdafwatering": "nee",
+    "hoogteniveau": 0,
+    "isbagnaam": null,
+    "lokaal_id": "110977113",
+    "mutatietype": null,
+    "naamfries": null,
+    "naamnl": "Achterwetering Zuidzijde",
+    "naamofficieel": null,
+    "namespace": "NL.TOP10NL",
+    "objectbegintijd": "2008-11-24",
+    "sluisnaam": null,
+    "tdncode": 611,
+    "tijdstipregistratie": "2012-02-06",
+    "typewater": "waterloop",
+    "vaarwegklasse": null,
+    "visualisatiecode": 12400,
+    "voorkomen": null
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       127585.39570785509,
+       446445.917634207
+      ],
+      [
+       127608.67165763208,
+       446452.9436785567
+      ],
+      [
+       127606.66566544514,
+       446458.3406946189
+      ],
+      [
+       127583.78571480248,
+       446451.38165089494
+      ],
+      [
+       127581.04372082616,
+       446450.7396462818
+      ],
+      [
+       127582.82971345415,
+       446445.2556296834
+      ],
+      [
+       127585.39570785509,
+       446445.917634207
+      ]
+     ]
+    ]
+   },
+   "id": "e93c69fb-1cb0-5d78-9958-cc5eff48a5e4"
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "breedteklasse": "6 - 12 meter",
+    "bronactualiteit": "2010-01-01",
+    "bronbeschrijving": "Een orthogerectificeerde fotografische opname van een deel van het aardoppervlak. Gemaakt vanuit een vliegtuig.",
+    "bronnauwkeurigheid": 0.1,
+    "brontype": "luchtfoto",
+    "brugnaam": null,
+    "functie": "overig",
+    "fysiekvoorkomen": null,
+    "getijdeinvloed": "nee",
+    "hoofdafwatering": "nee",
+    "hoogteniveau": -1,
+    "isbagnaam": null,
+    "lokaal_id": "110977234",
+    "mutatietype": null,
+    "naamfries": null,
+    "naamnl": "Achterwetering Zuidzijde",
+    "naamofficieel": null,
+    "namespace": "NL.TOP10NL",
+    "objectbegintijd": "2008-11-24",
+    "sluisnaam": null,
+    "tdncode": 611,
+    "tijdstipregistratie": "2012-02-06",
+    "typewater": "waterloop",
+    "vaarwegklasse": null,
+    "visualisatiecode": -12400,
+    "voorkomen": null
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       127582.82971345415,
+       446445.2556296834
+      ],
+      [
+       127581.04372082616,
+       446450.7396462818
+      ],
+      [
+       127578.34172676093,
+       446450.1066417355
+      ],
+      [
+       127580.42071870982,
+       446444.63362543005
+      ],
+      [
+       127582.82971345415,
+       446445.2556296834
+      ]
+     ]
+    ]
+   },
+   "id": "61426678-fa96-5765-841c-7bc56f13803f"
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "breedteklasse": "6 - 12 meter",
+    "bronactualiteit": "2002-01-01",
+    "bronbeschrijving": "Digitaal bestand met gecodeerde vectoren. Deze geven tezamen de topografie van Nederland weer op de schaal 1:10.000. Voorloper van TOP10NL.",
+    "bronnauwkeurigheid": 2,
+    "brontype": "TOP10vector",
+    "brugnaam": null,
+    "functie": "overig",
+    "fysiekvoorkomen": null,
+    "getijdeinvloed": "nee",
+    "hoofdafwatering": "nee",
+    "hoogteniveau": 0,
+    "isbagnaam": null,
+    "lokaal_id": "110976653",
+    "mutatietype": null,
+    "naamfries": null,
+    "naamnl": "Achterwetering Zuidzijde",
+    "naamofficieel": null,
+    "namespace": "NL.TOP10NL",
+    "objectbegintijd": "2008-11-24",
+    "sluisnaam": null,
+    "tdncode": 611,
+    "tijdstipregistratie": "2008-11-24",
+    "typewater": "waterloop",
+    "vaarwegklasse": null,
+    "visualisatiecode": 12400,
+    "voorkomen": null
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       127765.05431922092,
+       446501.0809757917
+      ],
+      [
+       127763.7443242025,
+       446504.53998588916
+      ],
+      [
+       127731.29339491969,
+       446495.0139263035
+      ],
+      [
+       127733.49438584532,
+       446487.9899053214
+      ],
+      [
+       127766.37631419122,
+       446497.58296557976
+      ],
+      [
+       127765.05431922092,
+       446501.0809757917
+      ]
+     ]
+    ]
+   },
+   "id": "5ea96c51-f122-5169-b7a6-f7d0e92b394d"
+  }
+ ],
+ "numberReturned": 16
+}
