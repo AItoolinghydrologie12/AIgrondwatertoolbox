@@ -12,6 +12,7 @@ import plotly.graph_objects as go
 import streamlit as st
 from draw_actions import NEW, apply_selection
 from grid_ui import centre_key, drawing_figure
+from streamlit.errors import StreamlitAPIException
 from toolbox_state import DEFAULT_RADIUS, KEY, MAP_CONFIG, Grid, bump, example, reset, ss
 
 from gwproducten.products import peilopzet_grid as p3
@@ -260,13 +261,38 @@ def draw_step(
     zone_values: dict[int, Any],
 ) -> go.Figure:
     """Step 2; returns the drawing figure (for the PNG export)."""
-    cell, nrow, ncol = grid.cell, grid.nrow, grid.ncol
     st.caption(
         "Kies rechts **wat** je tekent en **hoe**. Een watergang teken je als lijn (klik punten; "
         "de lengte per cel volgt uit de lijn) of met rechthoek/lasso als volle cellen. Andere "
         "objecten: selecteer cellen met rechthoek of lasso (werkbalk rechtsboven) en klik "
         "*Toepassen*. Lichtere kleur = minder watergang in de cel."
     )
+    draw_panel(grid, values, node_labels, zone_values)
+    group_tables(node_labels)
+    watercourse_tables(grid)
+    return ss[f"{KEY}_fig_draw"]
+
+
+def _rerun_panel() -> None:
+    """Rerun only the drawing panel; Streamlit refuses that during a full-page run (e.g.
+    in tests), and then the whole page reruns."""
+    try:
+        st.rerun(scope="fragment")
+    except StreamlitAPIException:
+        st.rerun()
+
+
+@st.fragment
+def draw_panel(
+    grid: Grid,
+    values: dict[str, Any],
+    node_labels: dict[str, str],
+    zone_values: dict[int, Any],
+) -> None:
+    """Map and drawing controls. A fragment: selecting cells, clicking line points and the
+    form inputs only rerun this panel; changes to the model (Toepassen, Lijn afronden,
+    Voorbeeld, Wissen) rerun the whole page."""
+    cell, nrow, ncol = grid.cell, grid.nrow, grid.ncol
     col_map, col_ctl = st.columns([3, 2])
     with col_ctl:
         obj = st.radio(
@@ -292,6 +318,7 @@ def draw_step(
             current_line=ss[f"{KEY}_line"], snap=snap, wells=grid.groups("wells"),
             ghbs=grid.groups("ghb"), zones=grid.zones(zone_values),
         )  # fmt: skip
+        ss[f"{KEY}_fig_draw"] = fig_draw
         # A stable key keeps zoom and pan between reruns; each selection is used only once
         # (``fresh``) instead of clearing it with a new key.
         draw_key = f"{KEY}_draw_{'lijn' if line_mode else 'cel'}"
@@ -313,8 +340,7 @@ def draw_step(
         pt = picked[-1]
         if not ss[f"{KEY}_line"] or ss[f"{KEY}_line"][-1] != pt:
             ss[f"{KEY}_line"].append(pt)
-        bump()
-        st.rerun()
+        _rerun_panel()  # the line in progress is not part of the model yet
 
     with col_ctl:
         wcs = ss[f"{KEY}_wcs"]
@@ -345,12 +371,10 @@ def draw_step(
             b1, b2 = st.columns(2)
             if b1.button("Laatste punt weg", disabled=not line, key=f"{KEY}_undo"):
                 line.pop()
-                bump()
-                st.rerun()
+                _rerun_panel()
             if b2.button("Lijn annuleren", disabled=not line, key=f"{KEY}_cancel"):
                 ss[f"{KEY}_line"] = []
-                bump()
-                st.rerun()
+                _rerun_panel()
             if st.button(
                 "Lijn afronden", type="primary", disabled=len(line) < 2, key=f"{KEY}_finish"
             ):
@@ -377,7 +401,3 @@ def draw_step(
         if b2.button("Alles wissen", key=f"{KEY}_clear"):
             reset([])
             st.rerun()
-
-    group_tables(node_labels)
-    watercourse_tables(grid)
-    return fig_draw

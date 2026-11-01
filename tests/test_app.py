@@ -386,3 +386,43 @@ def test_engine_comparison_page() -> None:
     assert any("droog" in w.value for w in at.warning)
     at.radio(key="p3_cmp_sit").set_value("referentie").run()
     assert not at.exception, [e.value for e in at.exception]
+
+
+def test_grid_product_line_undo_and_cancel_in_drawing_panel() -> None:
+    """The line buttons live in the drawing fragment; they also work in a full-page run."""
+    page = str(APP / "pages" / "1_Grondwatertoolbox.py")
+    at = AppTest.from_file(page, default_timeout=120).run()
+    at.session_state["p3_line"] = [(100.0, 100.0), (200.0, 100.0), (200.0, 300.0)]
+    at.run()
+    at.button(key="p3_undo").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.session_state["p3_line"] == [(100.0, 100.0), (200.0, 100.0)]
+    at.button(key="p3_cancel").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.session_state["p3_line"] == []
+
+
+def test_drawing_figure_cells_are_compact_and_in_place() -> None:
+    """Cell layers only carry the bounding box of their cells, at the right position, so a
+    100 x 100 drawing stays small enough to send on every click."""
+    import sys
+
+    import numpy as np
+
+    sys.path.insert(0, str(APP))
+    from grid_ui import drawing_figure
+
+    cell, n = 10.0, 100
+    wc = {"name": "w", "cells": ((5, 40), (6, 40), (6, 41)), "lengths": (10.0, 4.0, 6.0)}
+    snap = max(cell / 5.0, n * cell / 200.0)  # as on the page
+    fig = drawing_figure(n, n, cell, [wc], ((50, 50),), snap=snap)
+    heat = [t for t in fig.data if t.type == "heatmap"]
+    assert [t.name for t in heat] == ["buisdrainage", "w"]
+    w = heat[1]
+    z = np.asarray(w.z, dtype=float)
+    assert z.shape == (2, 2)  # rows 5-6, columns 40-41
+    assert (w.x0, w.y0, w.dx, w.dy) == (405.0, 55.0, cell, cell)  # centre of cell (5, 40)
+    assert z[0, 0] == 10.0 and z[1, 0] == 4.0 and z[1, 1] == 6.0 and np.isnan(z[0, 1])
+    assert len(fig.to_json()) < 600_000  # as sent by Streamlit (typed arrays)
+    empty = drawing_figure(n, n, cell, [], ())
+    assert not [t for t in empty.data if t.type == "heatmap"]  # no drains: no layer
