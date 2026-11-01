@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from grid_ui import to_cells
+from regis_ui import regis_inputs
 from toolbox_state import KEY, ss
 
 from gwproducten.core.params import meta
@@ -81,6 +82,8 @@ def location_inputs(values: dict[str, Any]) -> None:
         )
         st.divider()
         ahn_inputs(values)
+        st.divider()
+        regis_inputs(values)
 
 
 @st.cache_data(ttl=7 * 24 * 3600, max_entries=10, show_spinner="Maaiveld ophalen bij PDOK (AHN)…")
