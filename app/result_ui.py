@@ -12,7 +12,7 @@ import streamlit as st
 from engine_ui import engine_badge, model_zip
 from grid_ui import add_background, result_figure
 from location_ui import background, background_caption, model_bbox
-from profile_ui import crossings, profile_figure, profile_table
+from profile_ui import crossings, profile_figure, profile_table, wall_crossings
 from toolbox_state import KEY, MAP_CONFIG, ss
 from ui_common import TABS, csv_button, dict_table, png_buttons, split_theory
 
@@ -172,6 +172,7 @@ def show_result(
         res.x, res.y, z, params.cell, outlined, label=label, threshold=thr, reverse=rev,
         profile=pts, click_snap=snap if clicking else None,
         wells=[{"name": g.name, "cells": g.cells} for g in params.wells],
+        walls=[{"name": w.name, "faces": w.faces} for w in params.walls],
     )  # fmt: skip
     bg = background(model_bbox(params.origin_x, params.origin_y, params.size_x, params.size_y))
     if bg is not None:
@@ -216,12 +217,17 @@ def show_result(
                 for wc in params.watercourses
             ],
         )  # fmt: skip
-        fig_prof = profile_figure(prof, labels, crossed, params.threshold)
+        walls_crossed = wall_crossings(
+            prof["afstand [m]"].to_numpy(), prof["x [m]"].to_numpy(), prof["y [m]"].to_numpy(),
+            params.cell, list(params.walls),
+        )  # fmt: skip
+        fig_prof = profile_figure(prof, labels, crossed, params.threshold, walls_crossed)
         st.plotly_chart(fig_prof, width="stretch")
         st.caption(
             "Stippel = referentie, doorgetrokken = na opzet; rood vlak = verhoging van de "
             "bovenste laag (rechteras). Driehoekjes: peil van gekruiste watergangen "
-            "(open = referentie, dicht = opzet)."
+            "(open = referentie, dicht = opzet). Zwarte lijn: damwand (de stijghoogte "
+            "verspringt daar; de lijnen tussen celmiddens verbinden de twee kanten)."
         )
     with st.expander("Waterbalans en conductances", expanded=False):
         st.markdown("**Waterbalans [m³/d]**")
@@ -232,6 +238,14 @@ def show_result(
         )
         st.markdown("**Conductance per cel** (gemiddeld over de cellen van de watergang)")
         st.dataframe(res.conductances.round(3), hide_index=True)
+    if res.walls is not None:
+        with st.expander("Damwanden: doorstroming", expanded=False):
+            st.dataframe(res.walls.round(2), hide_index=True)
+            st.caption(
+                "Som van |q| over alle celranden van de wand, per doorsneden laag [m³/d]: hoeveel "
+                "water er nog door de wand gaat (0 bij een ondoorlatende wand). Geen post in de "
+                "waterbalans: het blijft binnen het model."
+            )
     if res.wells is not None:
         with st.expander("Putten: verlaging in de put", expanded=view == "putten"):
             st.dataframe(res.wells.round(2), hide_index=True)
@@ -249,14 +263,16 @@ def show_validation(params: p3.Params, res: p3.Result) -> None:
         "`tests/test_peilopzet_grid.py` en `tests/test_polyline.py` (parabool tussen twee "
         "sloten, maaivelddrainage, RIV-begrenzing, drain, buisdrainage per cel, lengte per "
         "cel, lijn → cellen, peilopzet vs 1D-analytisch met en zonder celgrootte-correctie, "
-        "gridverfijning, massabalans)."
+        "gridverfijning, massabalans) en `tests/test_wall.py` (damwand: strook tegen de "
+        "serieweerstand, ingesloten bouwput, lekkende wand, gesplitst pakket, gridverfijning)."
     )
     st.markdown(
         "**Vergelijking met MODFLOW 6** (`tests/test_mf6_comparison.py`, lokaal met flopy): "
         "zelfde rooster met elke laag als MF6-modellaag. Stijghoogten gelijk binnen 10⁻⁶ m "
-        "voor vaste en meebewegende T (MF6 'convertible'), putten, kwel, zones en alle "
-        "randtypen. Verschillen alleen bij droogvallende cellen en t.o.v. MF6-Newton "
-        "(stroomopwaartse weging van de natte dikte, enkele cm bij grote verlaging)."
+        "voor vaste en meebewegende T (MF6 'convertible'), putten, kwel, zones, alle "
+        "randtypen en damwanden (HFB-pakket). Verschillen alleen bij droogvallende cellen en "
+        "t.o.v. MF6-Newton (stroomopwaartse weging van de natte dikte, enkele cm bij grote "
+        "verlaging)."
     )
     st.dataframe(dict_table(res.mass_balance, "Massabalansfout [-]", "{:.1e}"), hide_index=True)
     st.dataframe(
@@ -307,6 +323,17 @@ def show_export(
     )
     if res.wells is not None:
         csv_button(res.wells, "peilopzet2d_putten.csv", "Putten (CSV)")
+    if res.walls is not None:
+        csv_button(res.walls, "peilopzet2d_damwanden.csv", "Damwanden: doorstroming (CSV)")
+        faces = pd.DataFrame(
+            [
+                {"damwand": w.name, "rij": r, "kolom": c,
+                 "rand": "oost van de cel" if axis == "x" else "noord van de cel"}
+                for w in params.walls
+                for r, c, axis in w.faces
+            ]
+        )  # fmt: skip
+        csv_button(faces, "peilopzet2d_damwand_celranden.csv", "Damwanden: celranden (CSV)")
     cells = pd.DataFrame(
         [
             {"watergang": wc["name"], "rij": r, "kolom": c, "lengte [m]": length}

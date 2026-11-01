@@ -243,6 +243,65 @@ $$
 s(r) = \frac{Q}{2\pi T}\,K_0\!\left(\frac{r}{\lambda}\right),\qquad \lambda = \sqrt{T c_\text{kwel}} .
 $$
 
+## Damwanden
+
+Een damwand (of kwelscherm) ligt op **celranden** en reikt vanaf de bovenkant tot en met een
+gekozen rekenlaag. In elke doorsneden laag komt in de verbinding tussen de twee cellen aan
+weerszijden een extra weerstand **in serie**, zoals het HFB-pakket (Horizontal Flow Barrier)
+van MODFLOW 6:
+
+$$
+C = \frac{C_\text{cel}\,C_w}{C_\text{cel} + C_w} ,\qquad
+C_w = \frac{\bar b\,\Delta y}{c_w} ,\qquad \bar b = \tfrac12\,(b_1 + b_2) ,
+$$
+
+met $C_\text{cel}$ de gewone conductance tussen de cellen (harmonisch gemiddelde van $T$),
+$c_w$ [d] de weerstand van de wand ($c_w = d_w/k_w$; de hydraulische karakteristiek van
+MODFLOW is $1/c_w$), $\Delta y$ de lengte van de celrand en $\bar b$ het gemiddelde van de
+laagdiktes van de twee cellen; bij meebewegende $T$ de natte diktes. Een **ondoorlatende**
+wand (standaard) heeft $C = 0$. De stroming door de wand per meter is $q = \bar b\,\Delta h /
+c_w$; in een strook van lengte $L$ werkt de wand als een extra lengte $k\,c_w$:
+
+$$
+Q = \frac{T\,B\,(h_1 - h_2)}{L + k\,c_w} .
+$$
+
+**Scheidende lagen** hebben in het model alleen verticale stroming; een wand daarin verandert
+niets. De verticale uitwisseling tussen de lagen blijft aan weerszijden van de wand gewoon
+bestaan.
+
+**Een wand die halverwege een pakket eindigt.** Het model heeft één rekenpunt per pakket en kan
+de stroming die onder de punt van de wand om buigt niet zelf weergeven. Splits daarom het
+pakket in stap 1 op de diepte van de punt: de app voegt dan een scheidende laag van 0,1 m met
+$c$ = 0,01 d in, en tussen de twee delen geldt de verticale weerstand
+
+$$
+c_\text{tussen} = \frac{D_1}{2k_v} + 0{,}01 + \frac{D_2}{2k_v} ,
+$$
+
+zoals bij elke twee pakketten (zie Schematisering). De wand reikt dan tot en met het bovenste
+deel. Het omstromen van de punt telt zo mee via de verticale weerstand van de twee halve
+pakketten; de samentrekking van de stroming vlak onder de punt (op een schaal kleiner dan de
+cel) zit er niet in, waardoor de wand iets minder werkt dan in een fijn x-z model. Een
+gesplitst pakket telt mee voor het maximum van 4 pakketten.
+
+**In referentie en opzet.** Per wand kies je of hij alleen in de opzet staat (onderdeel van de
+ingreep, standaard) of in beide situaties (een bestaande wand).
+
+**Ingesloten gebied.** Sluiten ondoorlatende wanden tot in de onderste rekenlaag een gebied
+helemaal af, dan moet daarbinnen water kunnen in- of uitstromen: een watergang, GHB, vaste
+rand of kwel-onderrand, of meer neerslag dan er wordt opgepompt (het overschot loopt via het
+maaiveld af). Anders bestaat er geen stationaire oplossing en meldt de app dat.
+
+**Uitvoer.** Per wand en per doorsneden laag de doorstroming $\sum |q|$ [m³/d] over alle
+celranden van de wand, voor referentie en opzet. Dit is geen term in de waterbalans (water
+binnen het model), maar laat zien hoeveel water er nog door of langs de wand gaat.
+
+**Validatie.** Strook met wand tegen de formule hierboven (exact); ingesloten bouwput met
+ondoorlatende wand tot de dichte basis: buiten de wand geen verlaging; de instroming door een
+lekkende wand gelijk aan de onttrekking min de neerslag binnen de wand; gelijk aan MODFLOW 6
+(HFB) binnen $10^{-5}$ m; gridverfijning.
+
 ## Resultaat
 
 - stijghoogte per laag (referentie en opzet) en de grondwaterstand t.o.v. maaiveld;
@@ -276,6 +335,9 @@ $$
 - **Kwel-onderrand**: $\varphi$ is vast en gelijk in referentie en opzet.
 - **Watergangen** volgen de cellen; kruisingen en bochten zijn gewoon cellen. De
   conductance per cel hangt niet af van de richting van de watergang in de cel.
+- **Damwanden** liggen op celranden (een schuine wand wordt een trap langs de cellen) en
+  reiken vanaf de bovenkant tot en met hele rekenlagen; een punt halverwege een pakket
+  vraagt om een gesplitst pakket (zie Damwanden).
 - **Maaivelddrainage** met weerstand $w_\text{mv}$ voorkomt grondwater ver boven maaiveld
   (oppervlakkige afvoer). Het is een overloop, geen fysisch drainsysteem.
 
@@ -284,6 +346,9 @@ $$
 - De Lange, W.J. (1999). A Cauchy boundary condition for the lumped interaction between an
   arbitrary number of surface waters and a regional aquifer. *Journal of Hydrology* 226,
   250–261.
+- Hsieh, P.A. & Freckleton, J.R. (1993). *Documentation of a computer program to simulate
+  horizontal-flow barriers using the U.S. Geological Survey's modular three-dimensional
+  finite-difference ground-water flow model*. USGS Open-File Report 92-477 (HFB-pakket).
 - Harbaugh, A.W. (2005). *MODFLOW-2005, The U.S. Geological Survey modular ground-water
   model — the Ground-Water Flow Process*. USGS Techniques and Methods 6-A16 (RIV- en
   DRN-pakket).

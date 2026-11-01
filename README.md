@@ -8,7 +8,7 @@ voor hydrologen, adviseurs en reviewers van bemalings- en peilbesluitrapportages
 
 | Product | Regime | Methoden |
 |---|---|---|
-| Grondwatertoolbox (rooster, numeriek) | stationair | numeriek rooster in bovenaanzicht (cellen 10–50 m, max 100 × 100 cellen: tot 5 km bij 50 m), watergangen tekenen per cel, zones met eigen lagen en maaiveld, RIV/DRN, putten (WEL), GHB-groepen, kwel via de onderrand, modelrand per laag, buisdrainage per cel, maaivelddrainage, neerslagoverschot |
+| Grondwatertoolbox (rooster, numeriek) | stationair | numeriek rooster in bovenaanzicht (cellen 10–50 m, max 100 × 100 cellen: tot 5 km bij 50 m), watergangen tekenen per cel, zones met eigen lagen en maaiveld, RIV/DRN, putten (WEL), GHB-groepen, damwanden (HFB), kwel via de onderrand, modelrand per laag, buisdrainage per cel, maaivelddrainage, neerslagoverschot |
 
 **Ondergrond:** kies de bovenkant (deklaag met freatisch niveau, of freatisch zandpakket) en
 1–4 watervoerende pakketten met scheidende lagen ertussen. **Watergangen** teken je op de kaart
@@ -143,6 +143,7 @@ de app onder **Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`)
 | Buisdrainage, maaivelddrainage | DRN op drainniveau resp. maaiveld | DRN |
 | Putten | vast debiet per cel en laag; stijghoogte in de put met Peaceman | WEL (stijghoogte in de put: MAW) |
 | Vaste peilen met weerstand, kwel | GHB per celgroep; kwel als GHB op de onderste laag | GHB |
+| Damwanden | op celranden, weerstand c_w in serie met de celconductance (C_w = b̄·Δy/c_w), ondoorlatend = 0 | HFB, zelfde formule |
 | Modelrand | buitenste ring vaste stijghoogte, doorlopend pakket (GHB met C = T·Δy/(Δx/2 + λ)) of gesloten, ook per laag | CHD, GHB (conductance zelf bepalen) of geen-stroming |
 | Aan/uit van RIV/DRN | Picard-iteratie tot geen toestand meer wisselt | idem, binnen de buitenste iteraties van IMS |
 | Lineaire oplosser | directe LU-ontbinding (SuperLU) met hergebruik als preconditioner (PCG, tolerantie 10⁻¹²) | iteratief (IMS: CG/BiCGSTAB met ILU) |
@@ -180,6 +181,10 @@ de app onder **Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`)
   Bruggeman/Hemker): met celgrootte-correctie binnen 0,6 % voor 2 t/m 4 pakketten, ook met
   anisotropie.
 - Grondwaterstand tussen GHB-randen met neerslag: exacte parabool.
+- Damwand dwars op een strook: exact de extra lengte k·c_w; ingesloten bouwput met een
+  ondoorlatende wand tot de dichte basis: buiten de wand geen verlaging; eigen rekenkern
+  gelijk aan MODFLOW 6 (HFB) binnen 10⁻⁵ m; de werking van een wand verandert < 2 % van
+  25 naar 12,5 m cellen.
 - Put in een lekkend pakket tegen De Glee: binnen 2 % vanaf 3 cellen van de put.
 - Overgang tussen zones (harmonisch gemiddelde): exact tegen twee pakketdelen in serie.
 - Bodem in een scheidende laag tegen een numerieke x-z doorsnede (zie bekende beperkingen).
@@ -260,8 +265,18 @@ product van en niet goedgekeurd door de USGS.
   (zoals MODFLOW 6 zonder AUTO_FLOW_REDUCE).
 - **GHB-groepen** en **kwel-onderrand**: q = A/c (h_ext − h), altijd actief. Het kwelpeil φ is
   gelijk in referentie en opzet.
-- Watergangen teken je als **lijn** (klikpunten op een hulprooster van cel/5); de lengte per
-  cel volgt uit de lijn, dus ook gedeeltelijke cellen, diagonalen en bochten. Met
+- **Damwanden** liggen op celranden: als lijn langs de celranden (klikpunten op de
+  celhoeken; een schuine wand wordt een trap) of rondom een selectie (bouwput). Een wand loopt
+  vanaf de bovenkant tot en met een hele rekenlaag, ondoorlatend of met een weerstand c_w, en
+  staat alleen in de opzet of ook in de referentie. Eindigt de wand halverwege een pakket,
+  splits dat pakket dan in stap 1 (*Pakket splitsen bij de punt van een damwand*): scheiding
+  van 0,1 m met c = 0,01 d; het omstromen van de punt telt mee via D/2kv van de twee delen,
+  de samentrekking vlak onder de punt niet. Een geheel ingesloten gebied zonder aanvoer
+  (alleen neerslag, en meer opgepompt dan er valt) heeft geen stationaire oplossing; de app
+  meldt dat. Zonder bemaling loopt zo'n gebied vol tot maaiveld (maaivelddrainage).
+- Watergangen teken je als **lijn** (klikpunten op een hulprooster van cel/5, bij grote
+  modellen hooguit ~100 per zijde); de lengte per cel volgt uit de lijn, dus ook
+  gedeeltelijke cellen, diagonalen en bochten. Met
   rechthoek/lasso kies je volle cellen (plassen, buisdrainage). De lengte per cel is
   achteraf per cel aan te passen. Een watergang ligt rekenkundig altijd in het celmidden.
 - **Locatie en kaartgegevens** (optioneel, stap 1 → *Locatie*): adres zoeken (PDOK
@@ -313,10 +328,10 @@ product van en niet goedgekeurd door de USGS.
 - **Waterbalans** (stap 3 → *Waterbalans en conductances*): staafdiagram per post, referentie
   naast opzet; positief = water het grondwater in.
 - **Tekenen** ververst alleen het tekenpaneel (Streamlit-fragment); bij 100 × 100 cellen gaat
-  per klik ca. 0,5 MB naar de browser (was 1,3 MB).
+  per klik ca. 0,12 MB naar de browser (was 1,3 MB).
 - Invoer en tekeningen staan alleen in de browsersessie. Bewaar ze via de zijbalk →
   *Project opslaan of laden* (JSON-bestand met alle invoer, watergangen, buisdrainage,
-  putten, GHB-groepen en zones) en laad ze later weer in.
+  putten, GHB-groepen, damwanden en zones) en laad ze later weer in.
 
 ## Publiceren op Streamlit Community Cloud
 

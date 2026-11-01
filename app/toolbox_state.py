@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import streamlit as st
-from grid_ui import absolute_lines, to_cells, wc_geometry
+from grid_ui import absolute_lines, to_cells, wall_faces, wc_geometry
 
 from gwproducten.core.layers import LayerStack
 from gwproducten.products import peilopzet_grid as p3
@@ -38,6 +38,7 @@ def example() -> list[dict[str, Any]]:
 def reset(wcs: list[dict[str, Any]]) -> None:
     ss[f"{KEY}_wcs"], ss[f"{KEY}_drain"], ss[f"{KEY}_line"] = wcs, set(), []
     ss[f"{KEY}_wells"], ss[f"{KEY}_ghb"], ss[f"{KEY}_zones"] = [], [], []
+    ss[f"{KEY}_walls"] = []
     ss[f"{KEY}_ver"] = ss.get(f"{KEY}_ver", 0) + 1
 
 
@@ -78,6 +79,13 @@ class Grid:
                 out.append({**z, "cells": cells})
         return out
 
+    def walls(self) -> list[dict[str, Any]]:
+        """Walls with their faces on the current grid."""
+        return [
+            {**w, "faces": wall_faces(w, self.cell, self.nrow, self.ncol)}
+            for w in ss.get(f"{KEY}_walls", [])
+        ]
+
     def drain_cells(self) -> tuple:
         return to_cells(ss[f"{KEY}_drain"], self.cell, self.nrow, self.ncol)
 
@@ -107,6 +115,15 @@ def build_params(
                 g["name"], g["cells"], g["layer"], g["head_ref"], g["head_new"], g["resistance"]
             )
             for g in grid.groups("ghb")
+        ),
+        walls=tuple(
+            p3.Wall(
+                w["name"], w["faces"], w["layer"],
+                None if w.get("impermeable", True) else float(w["resistance"]),
+                bool(w.get("reference", False)),
+            )  # fmt: skip
+            for w in grid.walls()
+            if w["faces"]
         ),
         watercourses=tuple(
             p3.Watercourse(

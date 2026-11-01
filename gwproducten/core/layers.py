@@ -30,6 +30,9 @@ TOP_MODE_LABEL = {
 }
 MAX_AQUIFERS = 4
 DEFAULT_ANISOTROPY = 0.33  # kv/kh of an aquifer
+# aquitard inserted where an aquifer is split (e.g. at the tip of a sheet pile wall)
+SPLIT_THICKNESS = 0.1  # [m], the minimum layer thickness
+SPLIT_RESISTANCE = 0.01  # [d]
 # lower bound for the horizontal transmissivity of a clay top layer [m2/d]; keeps the
 # eigenvalue problem well conditioned without changing results noticeably
 MIN_TOP_TRANSMISSIVITY = 1e-3
@@ -41,7 +44,7 @@ class Layer:
     kind: LayerKind
     thickness: float = param(10.0, "m", "Dikte", 0.1, 500.0)
     k_h: float = param(10.0, "m/d", "Horizontale doorlatendheid k", 1e-5, 1000.0)
-    c: float = param(500.0, "d", "Verticale weerstand c", 1.0, 1e6)
+    c: float = param(500.0, "d", "Verticale weerstand c", 0.01, 1e6)
     anisotropy: float = param(DEFAULT_ANISOTROPY, "-", "Anisotropie kv/kh", 0.001, 1.0)
 
     @property
@@ -184,3 +187,32 @@ class LayerStack:
         for lay in self.layers:
             errors += range_errors(lay, prefix=f"{lay.name}: ")
         return errors
+
+
+def split_aquifer(stack: LayerStack, index: int, depth: float) -> LayerStack:
+    """Split aquifer ``index`` at ``depth`` [m below its top] into two aquifers with the same
+    k and kv/kh, separated by a thin aquitard (SPLIT_THICKNESS, SPLIT_RESISTANCE) taken from
+    the lower part; the total thickness stays the same. The vertical resistance between the
+    halves is then D1/2kv + SPLIT_RESISTANCE + D2/2kv (see :meth:`LayerStack.node_resistances`).
+    """
+    lay = stack.layers[index]
+    if lay.kind != "pakket":
+        raise ValueError(f"Laag {index} ({lay.name}) is geen pakket.")
+    lower = lay.thickness - depth - SPLIT_THICKNESS
+    if depth < SPLIT_THICKNESS or lower < SPLIT_THICKNESS:
+        raise ValueError(
+            f"{lay.name}: splitsen op {depth:g} m laat een deel dunner dan "
+            f"{SPLIT_THICKNESS:g} m over (dikte {lay.thickness:g} m)."
+        )
+    aquifers, aquitards = [], []
+    for i, other in enumerate(stack.layers):
+        if other.kind == "scheidend":
+            aquitards.append((other.thickness, other.c, other.k_h))
+        elif i == index:
+            aquifers.append((depth, other.k_h, other.anisotropy))
+            aquitards.append((SPLIT_THICKNESS, SPLIT_RESISTANCE, other.k_h))
+            aquifers.append((lower, other.k_h, other.anisotropy))
+        else:
+            aquifers.append((other.thickness, other.k_h, other.anisotropy))
+    # top to bottom per kind; build_layers interleaves them again
+    return LayerStack(stack.top_mode, build_layers(stack.top_mode, aquifers, aquitards))

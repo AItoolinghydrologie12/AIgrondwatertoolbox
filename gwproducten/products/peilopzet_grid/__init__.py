@@ -10,11 +10,15 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.sparse import coo_matrix
+from scipy.sparse.csgraph import connected_components
 
+from gwproducten.core.grids import Face
 from gwproducten.core.layers import TOP_MODE_LABEL, LayerStack, build_layers
 from gwproducten.core.params import ParamError, param, range_errors
 from gwproducten.numeric.grid2d import (
     MIN_SATURATED_FRACTION,
+    Barrier,
     Convertible,
     Factorization,
     FluxBoundary,
@@ -35,6 +39,7 @@ META = {
         "numeriek: eindige volumes in bovenaanzicht, quasi-3D lagen, RIV/DRN-randen (Picard)",
         "putten (WEL), algemene stijghoogteranden (GHB) en kwel via de onderrand",
         "zones met eigen lagenopbouw en maaiveld (harmonisch gemiddelde tussen cellen)",
+        "damwanden op celranden (weerstand in serie, als het HFB-pakket van MODFLOW 6)",
     ],
 }
 
@@ -97,6 +102,22 @@ class GhbGroup:
     head_ref: float = param(3.8, "m NAP", "Stijghoogte referentie", -50.0, 50.0)
     head_new: float = param(3.8, "m NAP", "Stijghoogte na opzet", -50.0, 50.0)
     resistance: float = param(1.0, "d", "Weerstand c", 0.01, 1e6)
+
+
+@dataclass(frozen=True)
+class Wall:
+    """Sheet pile wall (damwand) on cell faces, from the top down to and including node
+    ``layer``; ``resistance`` c_w [d] or None (impermeable). ``reference``: also in the
+    reference situation (an existing wall); otherwise only in the opzet."""
+
+    name: str = "Damwand"
+    faces: tuple[Face, ...] = ()
+    layer: str = "freatisch"
+    resistance: float | None = None
+    reference: bool = False
+
+
+WALL_RESISTANCE = (1e-3, 1e7)  # [d] range of a leaky wall
 
 
 def column_cells(col: int, rows: range | list[int]) -> tuple[Cell, ...]:
@@ -164,6 +185,7 @@ class Params:
     watercourses: tuple[Watercourse, ...] = field(default=DEFAULT_WATERCOURSES)
     wells: tuple[WellGroup, ...] = ()
     ghb: tuple[GhbGroup, ...] = ()
+    walls: tuple[Wall, ...] = ()
     zones: tuple[Zone, ...] = ()
     seepage: bool = False
     seepage_head: float = param(4.8, "m NAP", "Stijghoogte diep pakket φ", -50.0, 50.0)
@@ -220,10 +242,12 @@ class Params:
                 )
         if errors:
             raise ParamError(errors)
-        names = [g.name for g in (*self.watercourses, *self.wells, *self.ghb, *self.zones)]
+        names = [
+            g.name for g in (*self.watercourses, *self.wells, *self.ghb, *self.walls, *self.zones)
+        ]
         if len(set(names)) != len(names):
             errors.append(
-                "Elke watergang, putgroep, GHB-groep en zone moet een unieke naam hebben."
+                "Elke watergang, putgroep, GHB-groep, damwand en zone moet een unieke naam hebben."
             )
         if any(n in RESERVED_NAMES for n in names):
             errors.append(f"Deze namen zijn gereserveerd: {', '.join(RESERVED_NAMES)}.")
@@ -276,8 +300,32 @@ class Params:
                     ]
         if any(not (0 <= r < self.nrow and 0 <= c < self.ncol) for r, c in self.drain_cells):
             errors.append("Buisdrainage: een of meer cellen liggen buiten het rooster.")
+        errors += self._wall_errors(node_keys)
         if errors:
             raise ParamError(errors)
+        errors += _enclosure_errors(self)
+        if errors:
+            raise ParamError(errors)
+
+    def _wall_errors(self, node_keys: list[str]) -> list[str]:
+        errors: list[str] = []
+        lo, hi = WALL_RESISTANCE
+        for w in self.walls:
+            prefix = f"{w.name}: "
+            if w.layer not in node_keys:
+                errors.append(
+                    f"{prefix}laag '{w.layer}' bestaat niet (kies uit {', '.join(node_keys)})."
+                )
+            if not w.faces:
+                errors.append(f"{prefix}er zijn geen celranden toegewezen.")
+            if any(not _face_inside(f, self.nrow, self.ncol) for f in w.faces):
+                errors.append(f"{prefix}een of meer celranden liggen buiten het rooster.")
+            if w.resistance is not None and not lo <= w.resistance <= hi:
+                errors.append(
+                    f"{prefix}de weerstand moet tussen {lo:g} en {hi:g} d liggen (leeg = "
+                    "ondoorlatend)."
+                )
+        return errors
 
     def _zone_errors(self) -> list[str]:
         errors: list[str] = []
@@ -303,6 +351,101 @@ class Params:
             if any(not (0 <= r < self.nrow and 0 <= c < self.ncol) for r, c in z.cells):
                 errors.append(f"{prefix}een of meer cellen liggen buiten het rooster.")
         return errors
+
+
+def _face_inside(face: Face, nrow: int, ncol: int) -> bool:
+    r, c, axis = face
+    if axis == "x":
+        return 0 <= r < nrow and 0 <= c < ncol - 1
+    return axis == "y" and 0 <= r < nrow - 1 and 0 <= c < ncol
+
+
+def _face_cells(face: Face, ncol: int) -> tuple[int, int]:
+    """Flat indices (row * ncol + col) of the two cells on both sides of a face."""
+    r, c, axis = face
+    a = r * ncol + c
+    return a, a + (1 if axis == "x" else ncol)
+
+
+def _walls_in(params: Params, stage: str) -> list[Wall]:
+    return [w for w in params.walls if stage == "new" or w.reference]
+
+
+def _barriers(params: Params, stage: str) -> list[Barrier]:
+    """One barrier per wall and per node it cuts (from the top down to its layer)."""
+    walls = _walls_in(params, stage)
+    if not walls:
+        return []
+    keys = [n.key for n in params.stack.nodes]
+    geometry = layer_geometry(params)
+    out = []
+    for w in walls:
+        cells = np.array([_face_cells(f, params.ncol) for f in dict.fromkeys(w.faces)])
+        a, b = cells[:, 0], cells[:, 1]
+        hydchr = 0.0 if w.resistance is None else 1.0 / w.resistance
+        for j in range(keys.index(w.layer) + 1):
+            _, top, bottom = geometry[j]
+            thick = np.broadcast_to(top - bottom, (params.nrow, params.ncol)).ravel()
+            out.append(
+                Barrier(w.name, j, a, b, np.full(a.size, hydchr), np.array([thick[a], thick[b]]))
+            )
+    return out
+
+
+def _enclosure_errors(params: Params) -> list[str]:
+    """Areas closed off by impermeable walls through every layer need a supply: a
+    watercourse, GHB, fixed or continuing boundary, seepage, or more recharge than is
+    pumped out. Without it there is no steady solution."""
+    errors: list[str] = []
+    nl, nr, nc = len(params.stack.nodes), params.nrow, params.ncol
+    keys = [n.key for n in params.stack.nodes]
+    idx = np.arange(nl * nr * nc).reshape(nl, nr, nc)
+    ring = np.zeros((nr, nc), dtype=bool)
+    ring[[0, -1], :] = True
+    ring[:, [0, -1]] = True
+    for stage, label in (("ref", "referentie"), ("new", "opzet")):
+        closed = [b for b in _barriers(params, stage) if not np.any(b.hydchr > 0)]
+        if not closed:
+            continue
+        cx = np.ones((nl, nr, nc - 1), dtype=bool)  # open faces between (r, c) and (r, c + 1)
+        cy = np.ones((nl, nr - 1, nc), dtype=bool)  # between (r, c) and (r + 1, c)
+        for b in closed:
+            r, c = np.divmod(np.minimum(b.a, b.b), nc)
+            along_x = np.abs(b.b - b.a) == 1
+            cx[b.layer, r[along_x], c[along_x]] = False
+            cy[b.layer, r[~along_x], c[~along_x]] = False
+        i = np.concatenate([idx[:, :, :-1][cx], idx[:, :-1, :][cy], idx[:-1].ravel()])
+        k = np.concatenate([idx[:, :, 1:][cx], idx[:, 1:, :][cy], idx[1:].ravel()])
+        graph = coo_matrix((np.ones(i.size), (i, k)), shape=(idx.size, idx.size))
+        _, comp = connected_components(graph, directed=False)
+        comp = comp.reshape(nl, nr, nc)
+        anchored: set[int] = set()
+        for j, (kind, _) in enumerate(ring_layers(params)):
+            if kind != "gesloten":
+                anchored |= set(np.unique(comp[j][ring]).tolist())
+        if params.seepage:
+            anchored |= set(np.unique(comp[-1]).tolist())
+        for g in (*params.watercourses, *params.ghb):
+            anchored |= {int(comp[0, r, c]) for r, c in g.cells}
+        for cid in sorted(set(np.unique(comp[0]).tolist()) - anchored):
+            n_top = int((comp[0] == cid).sum())
+            rain = params.recharge * params.cell**2 * n_top
+            pumped = sum(
+                (g.q_ref if stage == "ref" else g.q_new)
+                for g in params.wells
+                for r, c in g.cells
+                if comp[keys.index(g.layer), r, c] == cid
+            )
+            if rain - pumped <= 0:
+                names = ", ".join(w.name for w in _walls_in(params, stage) if w.resistance is None)
+                errors.append(
+                    f"Damwand ({names}, {label}): het ingesloten gebied van {n_top} cellen heeft "
+                    f"geen aanvoer: geen watergang, GHB, rand of kwel, en er wordt {pumped:.0f} "
+                    f"m³/d opgepompt bij {rain:.0f} m³/d neerslag. Stationair bestaat er dan geen "
+                    "oplossing. Geef de wand een weerstand, laat hem minder diep reiken, of zet "
+                    "een watergang of kwel-onderrand in het gebied."
+                )
+    return errors
 
 
 def subsoil_helper(params: Params) -> Subsoil:
@@ -400,6 +543,7 @@ class Result:
     zone_names: list[str]  # per zone index, "basis" first
     well_drawdown: np.ndarray | None = None  # (n_nodes, nrow, ncol) by the wells (opzet) [m]
     wells: pd.DataFrame | None = None  # per well: cell average and head in the well
+    walls: pd.DataFrame | None = None  # per wall and layer: flow through the wall [m3/d]
     engine: str = "eigen"  # engine that produced the result (after a possible fallback)
     engine_note: str = ""  # e.g. "MODFLOW 6 (standaard)" or the reason for a fallback
     seconds: float = 0.0  # calculation time [s]
@@ -645,7 +789,7 @@ def compute(params: Params) -> Result:
             fixed_head=fixed,
             fluxes=_wells(params, sub, run) if with_wells else (),
             initial_active=None if start is None else start.active,
-            factorization=factorization, convertible=convertible,
+            factorization=factorization, convertible=convertible, barriers=_barriers(params, run),
         )  # fmt: skip
 
     # the opzet run without wells gives the (nonlinear) well drawdown
@@ -818,6 +962,8 @@ def compute(params: Params) -> Result:
                 "onderkant van de laag; dit debiet is met deze put niet haalbaar."
             )
 
+    walls = _wall_table(params, sols) if params.walls else None
+
     x = (np.arange(params.ncol) + 0.5) * params.cell
     y = (np.arange(params.nrow) + 0.5) * params.cell
     return Result(
@@ -838,10 +984,32 @@ def compute(params: Params) -> Result:
         zone_names=zone_names,
         well_drawdown=well_drawdown,
         wells=wells,
+        walls=walls,
         engine=engine,
         engine_note=engine_note,
         seconds=time.perf_counter() - t_start,
     )
+
+
+def _wall_table(params: Params, sols: dict) -> pd.DataFrame:
+    """Per wall and cut layer: sum of |flow| over its faces [m3/d], reference and opzet."""
+    nodes = params.stack.nodes
+    keys = [n.key for n in nodes]
+    cols = {"ref": "referentie [m³/d]", "new": "opzet [m³/d]"}
+    flows: dict[tuple[str, int], dict[str, float]] = {}
+    for stage, col in cols.items():
+        for bar, q in zip(_barriers(params, stage), sols[stage].barrier_flow, strict=True):
+            row = flows.setdefault((bar.name, bar.layer), {})
+            row[col] = row.get(col, 0.0) + float(np.abs(q).sum())
+    rows = [
+        {"Damwand": w.name, "Laag": nodes[j].label,
+         "Weerstand": "ondoorlatend" if w.resistance is None else f"{w.resistance:g} d",
+         "In referentie": "ja" if w.reference else "nee",
+         **{col: flows.get((w.name, j), {}).get(col, 0.0) for col in cols.values()}}
+        for w in params.walls
+        for j in range(keys.index(w.layer) + 1)
+    ]  # fmt: skip
+    return pd.DataFrame(rows)
 
 
 def _mf6_runs(params, boundaries, sub, fixed, T, convertible, need_no_wells):
@@ -861,7 +1029,7 @@ def _mf6_runs(params, boundaries, sub, fixed, T, convertible, need_no_wells):
                 sols[key], newton = mf6.solve(
                     params, boundaries(stage),
                     _wells(params, sub, stage) if with_wells else [], fixed, T, convertible,
-                    Path(tmp) / key,
+                    Path(tmp) / key, _barriers(params, stage),
                 )  # fmt: skip
                 newton_used |= newton
     except (RuntimeError, OSError) as err:
@@ -923,6 +1091,7 @@ __all__ = [
     "Result",
     "GhbGroup",
     "Watercourse",
+    "Wall",
     "WellGroup",
     "Zone",
     "columns",

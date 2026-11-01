@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 import plotly.graph_objects as go
 
-from gwproducten.core.grids import polyline_cell_lengths
+from gwproducten.core.grids import Face, outline_faces, polyline_cell_lengths, polyline_faces
 
 PALETTE = (
     "#1f77b4", "#ff7f0e", "#9467bd", "#8c564b", "#e377c2", "#17becf", "#bcbd22", "#7f7f7f",
@@ -15,8 +15,10 @@ PALETTE = (
 DRAIN_COLOR = "#7fbf7b"
 GHB_COLOR = "#17becf"
 WELL_COLOR = "#111111"
+WALL_COLOR = "#000000"
 THRESHOLD_COLOR = "#d62828"
 MAX_LEGEND = 8  # watercourses in the legend; more would push the map away
+SNAP_POINTS = 100  # click points along the longest side when drawing a line
 ZONE_COLORS = ("#c9a227", "#6a994e", "#bc4749", "#577590", "#9d4edd")
 
 
@@ -69,6 +71,12 @@ def wc_geometry(
     return cells, tuple(lengths[rc] for rc in cells)
 
 
+def line_snap(cell: float, size_x: float, size_y: float) -> float:
+    """Spacing of the click points for drawing a line: a fifth of a cell, but at most
+    SNAP_POINTS along the longest side (the points go to the browser on every rerun)."""
+    return max(cell / 5.0, max(size_x, size_y) / SNAP_POINTS)
+
+
 def drawing_figure(
     nrow: int,
     ncol: int,
@@ -82,11 +90,12 @@ def drawing_figure(
     ghbs: list[dict[str, Any]] | None = None,
     zones: list[dict[str, Any]] | None = None,
     outlines: list[list[tuple[float, float]]] | None = None,
+    walls: list[dict[str, Any]] | None = None,
 ) -> go.Figure:
     """Grid with zones (subsoil), level-area borders (``outlines``), watercourses (shade =
-    length in the cell), drawn lines and pipe-drained cells. The last trace is the selection
-    target: cell centres (box/lasso), or a snap grid of spacing ``snap`` for clicking line
-    vertices."""
+    length in the cell), drawn lines, pipe-drained cells and walls (on cell faces). The last
+    trace is the selection target: cell centres (box/lasso), or a snap grid of spacing
+    ``snap`` for clicking line vertices."""
     x = (np.arange(ncol) + 0.5) * cell
     y = (np.arange(nrow) + 0.5) * cell
     fig = go.Figure()
@@ -152,6 +161,7 @@ def drawing_figure(
             )
         )  # fmt: skip
     _add_wells(fig, wells or [], cell)
+    add_walls(fig, walls or [], cell)
     if current_line:
         fig.add_trace(
             go.Scatter(
@@ -224,6 +234,7 @@ def result_figure(
     click_snap: float | None = None,
     wells: list[dict[str, Any]] | None = None,
     min_span: float = 0.0,
+    walls: list[dict[str, Any]] | None = None,
 ) -> go.Figure:
     """Contour map of a result field with watercourse cells outlined, an optional profile
     line, and (``click_snap``) a last trace of click points on a snap grid. ``min_span``:
@@ -262,6 +273,7 @@ def result_figure(
             )
         )  # fmt: skip
     _add_wells(fig, wells or [], cell)
+    add_walls(fig, walls or [], cell)
     if profile:
         fig.add_trace(
             go.Scatter(
@@ -358,6 +370,49 @@ def _add_wells(fig: go.Figure, wells: list[dict[str, Any]], cell: float) -> None
                 marker={"symbol": "x-thin", "size": 11, "color": WELL_COLOR,
                         "line": {"width": 3, "color": WELL_COLOR}},
                 hovertemplate=g["name"] + "<extra>put</extra>",
+            )
+        )  # fmt: skip
+
+
+def face_segment(face: Face, cell: float) -> list[tuple[float, float]]:
+    """The two end points [m] of a cell face."""
+    r, c, axis = face
+    if axis == "x":
+        return [((c + 1) * cell, r * cell), ((c + 1) * cell, (r + 1) * cell)]
+    return [(c * cell, (r + 1) * cell), ((c + 1) * cell, (r + 1) * cell)]
+
+
+def wall_faces(wall: dict[str, Any], cell: float, nrow: int, ncol: int) -> tuple[Face, ...]:
+    """Faces of a drawn wall on the current grid: its lines (in metres) follow the grid
+    lines; a wall drawn around a selection is stored as the segments of its outline."""
+    faces: dict[Face, None] = {}
+    for line in wall.get("lines", []):
+        faces.update(dict.fromkeys(polyline_faces(line, cell, nrow, ncol)))
+    return tuple(faces)
+
+
+def outline_lines(
+    points: set[tuple[float, float]], cell: float, nrow: int, ncol: int
+) -> list[list[tuple[float, float]]]:
+    """Segments [m] of the outline of the cells at ``points`` (cell centres)."""
+    cells = set(to_cells(points, cell, nrow, ncol))
+    return [face_segment(f, cell) for f in outline_faces(cells, nrow, ncol)]
+
+
+def add_walls(fig: go.Figure, walls: list[dict[str, Any]], cell: float) -> None:
+    """One thick line trace per wall along its faces."""
+    for w in walls:
+        xs: list[float | None] = []
+        ys: list[float | None] = []
+        for f in w["faces"]:
+            (x0, y0), (x1, y1) = face_segment(f, cell)
+            xs += [x0, x1, None]
+            ys += [y0, y1, None]
+        fig.add_trace(
+            go.Scatter(
+                x=xs, y=ys, mode="lines", name=f"{w['name']} (damwand)",
+                line={"color": WALL_COLOR, "width": 5},
+                hovertemplate=w["name"] + "<extra>damwand</extra>",
             )
         )  # fmt: skip
 

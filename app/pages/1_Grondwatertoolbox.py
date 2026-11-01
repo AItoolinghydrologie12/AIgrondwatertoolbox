@@ -30,6 +30,7 @@ page_header(p3.META)
 if f"{KEY}_wcs" not in ss:
     reset(example())
 ss.setdefault(f"{KEY}_zones", [])
+ss.setdefault(f"{KEY}_walls", [])
 _pending = ss.pop(f"{KEY}_pending_project", None)
 if _pending is not None:  # loaded in the previous run, applied before the widgets exist
     apply_project(ss, KEY, _pending)

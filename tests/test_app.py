@@ -410,11 +410,12 @@ def test_drawing_figure_cells_are_compact_and_in_place() -> None:
     import numpy as np
 
     sys.path.insert(0, str(APP))
-    from grid_ui import drawing_figure
+    from grid_ui import drawing_figure, line_snap
 
     cell, n = 10.0, 100
     wc = {"name": "w", "cells": ((5, 40), (6, 40), (6, 41)), "lengths": (10.0, 4.0, 6.0)}
-    snap = max(cell / 5.0, n * cell / 200.0)  # as on the page
+    snap = line_snap(cell, n * cell, n * cell)
+    assert snap == 10.0  # 101 x 101 click points on a 1 km model
     fig = drawing_figure(n, n, cell, [wc], ((50, 50),), snap=snap)
     heat = [t for t in fig.data if t.type == "heatmap"]
     assert [t.name for t in heat] == ["buisdrainage", "w"]
@@ -423,7 +424,7 @@ def test_drawing_figure_cells_are_compact_and_in_place() -> None:
     assert z.shape == (2, 2)  # rows 5-6, columns 40-41
     assert (w.x0, w.y0, w.dx, w.dy) == (405.0, 55.0, cell, cell)  # centre of cell (5, 40)
     assert z[0, 0] == 10.0 and z[1, 0] == 4.0 and z[1, 1] == 6.0 and np.isnan(z[0, 1])
-    assert len(fig.to_json()) < 600_000  # as sent by Streamlit (typed arrays)
+    assert len(fig.to_json()) < 200_000  # as sent by Streamlit (typed arrays)
     empty = drawing_figure(n, n, cell, [], ())
     assert not [t for t in empty.data if t.type == "heatmap"]  # no drains: no layer
 
@@ -633,3 +634,64 @@ def test_grid_product_levels_and_legger_from_water_board(monkeypatch: pytest.Mon
     at.button(key="p3_calc").click().run()
     assert not at.exception, [e.value for e in at.exception]
     assert not at.error, [e.value for e in at.error]
+
+
+def test_grid_product_walls_split_and_project() -> None:
+    """A wall drawn as a line and one around a pit, both through pakket 1: the model computes
+    with them, shows them on the maps and in the table; splitting pakket 1 at the wall tip
+    keeps the wall in the upper part and moves a well in the old pakket 1 along; the walls
+    survive saving and loading a project."""
+    import json
+    import sys
+
+    sys.path.insert(0, str(APP))
+    from project_io import export_project, parse_project
+
+    page = str(APP / "pages" / "1_Grondwatertoolbox.py")
+    at = AppTest.from_file(page, default_timeout=120).run()
+    at.session_state["p3_walls"] = [
+        {"name": "scherm", "layer": "pakket1", "impermeable": True, "resistance": 100.0,
+         "reference": False, "lines": [[(500.0, 300.0), (500.0, 700.0)]]},
+        {"name": "bouwput", "layer": "freatisch", "impermeable": False, "resistance": 50.0,
+         "reference": True, "lines": [[(700.0, 700.0), (800.0, 700.0), (800.0, 800.0)]]},
+    ]  # fmt: skip
+    at.session_state["p3_wells"] = [
+        {"name": "bem", "layer": "pakket1", "q_ref": 0.0, "q_new": 50.0, "radius": 0.15,
+         "points": {(762.5, 762.5)}},
+    ]  # fmt: skip
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    names = [t.name for t in at.session_state["p3_fig_draw"].data]
+    assert "scherm (damwand)" in names and "bouwput (damwand)" in names
+    at.button(key="p3_calc").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert not at.error, [e.value for e in at.error]
+    params = at.session_state["p3_result"]["params"]
+    assert [(w.name, len(w.faces), w.resistance) for w in params.walls] == [
+        ("scherm", 16, None), ("bouwput", 8, 50.0),
+    ]  # fmt: skip
+    res = at.session_state["p3_result"]["res"]
+    assert set(res.walls["Damwand"]) == {"scherm", "bouwput"}
+    specs = [c.proto.spec for c in at.get("plotly_chart")]
+    assert any('"scherm (damwand)"' in s for s in specs)  # result map
+    assert any("scherm (damwand)" in s and "afstand langs profiel" in s for s in specs)
+
+    text = json.dumps(export_project(at.session_state.to_dict(), "p3"))
+    data, errors = parse_project(text)
+    assert not errors
+    fresh = AppTest.from_file(page, default_timeout=120).run()
+    fresh.session_state["p3_pending_project"] = data
+    fresh.run()
+    fresh.button(key="p3_calc").click().run()
+    assert fresh.session_state["p3_result"]["params"].walls == params.walls
+
+    at.number_input(key="p3_split_tip").set_value(-10.0).run()  # 8 m into pakket 1 (top -2)
+    at.button(key="p3_split_go").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert at.session_state["p3_naq_freatisch_zand"] == 3
+    assert at.session_state["p3_walls"][0]["layer"] == "pakket1"  # the upper part
+    assert at.session_state["p3_wells"][0]["layer"] == "pakket1"
+    at.button(key="p3_calc").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    split = at.session_state["p3_result"]["params"].stack
+    assert [round(lay.thickness, 2) for lay in split.layers] == [5.0, 2.0, 8.0, 0.1, 11.9]

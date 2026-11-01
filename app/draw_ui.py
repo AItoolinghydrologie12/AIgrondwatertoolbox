@@ -1,5 +1,5 @@
-"""Step 2 of the Grondwatertoolbox page: drawing watercourses, drains, wells, GHB and zones
-on the grid, and the tables to edit them."""
+"""Step 2 of the Grondwatertoolbox page: drawing watercourses, drains, wells, GHB, walls
+(damwanden) and zones on the grid, and the tables to edit them."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from draw_actions import NEW, apply_selection
-from grid_ui import add_background, centre_key, drawing_figure
+from grid_ui import add_background, centre_key, drawing_figure, line_snap
 from location_ui import background, background_caption, background_inputs, model_bbox
 from streamlit.errors import StreamlitAPIException
 from toolbox_state import DEFAULT_RADIUS, KEY, MAP_CONFIG, Grid, bump, example, reset, ss
@@ -35,9 +35,12 @@ OBJECTS = {
     "drain": "Buisdrainage",
     "put": "Put",
     "ghb": "GHB",
+    "damwand": "Damwand",
     "zone": "Zone",
 }
 WC_MODES = {"lijn": "lijn klikken", "cellen": "cellen selecteren", "wissen": "cellen weghalen"}
+WALL_MODES = {"lijn": "lijn langs celranden", "rondom": "rondom selectie"}
+WALL_RESISTANCE = 100.0  # [d] starting value when a wall is made leaky
 GROUP_COLUMNS = {
     "wells": {
         "name": "Naam", "layer": "Laag", "q_ref": "Q per put ref [m³/d]",
@@ -130,6 +133,84 @@ def group_form(action: str, labels: dict[str, str], surface: float) -> dict[str,
             help="Conductance per cel = celoppervlak / c.",
         )  # fmt: skip
     return props
+
+
+def wall_form(labels: dict[str, str]) -> dict[str, Any]:
+    """Properties of a new wall: name, deepest layer, impermeable or c_w, reference."""
+    k = f"{KEY}_nwall"
+    props: dict[str, Any] = {
+        "name": st.text_input("Naam", f"Damwand {len(ss[f'{KEY}_walls']) + 1}", key=f"{k}_name"),
+        "layer": st.selectbox(
+            "Tot en met laag", list(labels), format_func=labels.get, key=f"{k}_layer",
+            index=min(1, len(labels) - 1),
+            help="De wand loopt vanaf de bovenkant door alle lagen tot en met deze. Eindigt "
+            "hij halverwege een pakket: splits dat pakket in stap 1 op de diepte van de punt.",
+        ),
+    }  # fmt: skip
+    c1, c2 = st.columns(2)
+    props["impermeable"] = c1.checkbox("Ondoorlatend", value=True, key=f"{k}_imp")
+    props["resistance"] = c2.number_input(
+        "Weerstand c_w [d]", value=WALL_RESISTANCE, min_value=p3.WALL_RESISTANCE[0],
+        max_value=p3.WALL_RESISTANCE[1], format="%g", key=f"{k}_c",
+        disabled=props["impermeable"],
+        help="Weerstand van de wand (dikte / k), bijv. voor lekkage door de sloten. "
+        "Doorstroming per meter wand = laagdikte × verschil in stijghoogte / c_w.",
+    )  # fmt: skip
+    props["reference"] = st.checkbox(
+        "Ook in de referentie (bestaande wand)", value=False, key=f"{k}_ref",
+        help="Uit: de wand hoort bij de ingreep en staat alleen in de opzet.",
+    )  # fmt: skip
+    return props
+
+
+def wall_table(labels: dict[str, str], grid: Grid) -> None:
+    """Editable table of the walls."""
+    walls = ss.get(f"{KEY}_walls", [])
+    if not walls:
+        return
+    by_label = {v: k for k, v in labels.items()}
+    st.markdown("**Damwanden** (direct te bewerken)")
+    table = pd.DataFrame(
+        [
+            {
+                "Naam": w["name"], "Tot en met laag": labels.get(w["layer"], w["layer"]),
+                "Ondoorlatend": bool(w.get("impermeable", True)),
+                "Weerstand c_w [d]": float(w.get("resistance", WALL_RESISTANCE)),
+                "Ook in referentie": bool(w.get("reference", False)),
+                "Celranden": len(v["faces"]), "Lengte [m]": len(v["faces"]) * grid.cell,
+                "Verwijderen": False,
+            }
+            for w, v in zip(walls, grid.walls(), strict=True)
+        ]
+    )  # fmt: skip
+    edited = st.data_editor(
+        table, hide_index=True, key=f"{KEY}_walls_table_{ss[f'{KEY}_ver']}", width="stretch",
+        column_config={
+            "Tot en met laag": st.column_config.SelectboxColumn(options=list(by_label)),
+            "Weerstand c_w [d]": st.column_config.NumberColumn(
+                min_value=p3.WALL_RESISTANCE[0], max_value=p3.WALL_RESISTANCE[1],
+                help="Alleen als de wand niet ondoorlatend is.",
+            ),
+            "Celranden": st.column_config.NumberColumn(disabled=True),
+            "Lengte [m]": st.column_config.NumberColumn(disabled=True),
+        },
+    )  # fmt: skip
+    for w, (_, row) in zip(walls, edited.iterrows(), strict=True):
+        w["name"] = row["Naam"]
+        w["layer"] = by_label.get(row["Tot en met laag"], row["Tot en met laag"])
+        w["impermeable"] = bool(row["Ondoorlatend"])
+        w["resistance"] = float(row["Weerstand c_w [d]"])
+        w["reference"] = bool(row["Ook in referentie"])
+    if edited["Verwijderen"].any():
+        ss[f"{KEY}_walls"] = [
+            w for w, rm in zip(walls, edited["Verwijderen"], strict=True) if not rm
+        ]
+        bump()
+        st.rerun()
+    st.caption(
+        "Een damwand ligt op celranden en loopt vanaf de bovenkant tot en met de gekozen laag. "
+        "Scheidende lagen hebben in het model geen horizontale stroming. Zie Theorie."
+    )
 
 
 def group_tables(labels: dict[str, str]) -> None:
@@ -265,14 +346,16 @@ def draw_step(
     """Step 2; returns the drawing figure (for the PNG export)."""
     st.caption(
         "Kies rechts **wat** je tekent en **hoe**. Een watergang teken je als lijn (klik punten; "
-        "de lengte per cel volgt uit de lijn) of met rechthoek/lasso als volle cellen. Andere "
-        "objecten: selecteer cellen met rechthoek of lasso (werkbalk rechtsboven) en klik "
-        "*Toepassen*. Lichtere kleur = minder watergang in de cel."
+        "de lengte per cel volgt uit de lijn) of met rechthoek/lasso als volle cellen. Een "
+        "damwand klik je als lijn langs de celranden, of zet je rondom een selectie (bouwput). "
+        "Andere objecten: selecteer cellen met rechthoek of lasso (werkbalk rechtsboven) en "
+        "klik *Toepassen*. Lichtere kleur = minder watergang in de cel."
     )
     draw_panel(grid, values, node_labels, zone_values)
     import_inputs(grid, values)
     import_notice()
     group_tables(node_labels)
+    wall_table(node_labels, grid)
     watercourse_tables(grid)
     return ss[f"{KEY}_fig_draw"]
 
@@ -310,20 +393,27 @@ def draw_panel(
                 "Hoe?", list(WC_MODES), format_func=WC_MODES.get, horizontal=True,
                 key=f"{KEY}_wc_how",
             )  # fmt: skip
+        elif obj == "damwand":
+            how = st.radio(
+                "Hoe?", list(WALL_MODES), format_func=WALL_MODES.get, horizontal=True,
+                key=f"{KEY}_wall_how",
+            )  # fmt: skip
         else:
             how = st.radio(
                 "Hoe?", ["toevoegen", "verwijderen"], horizontal=True, key=f"{KEY}_how",
                 format_func={"toevoegen": "cellen toevoegen", "verwijderen": "cellen weghalen"}.get,
             )  # fmt: skip
-    line_mode = obj == "watergang" and how == "lijn"
-    snap = max(cell / 5.0, max(values["size_x"], values["size_y"]) / 200.0) if line_mode else None
+    line_mode = obj in ("watergang", "damwand") and how == "lijn"
+    snap = None
+    if line_mode:  # a wall follows the grid lines: click the cell corners
+        snap = cell if obj == "damwand" else line_snap(cell, values["size_x"], values["size_y"])
 
     with col_map:
         fig_draw = drawing_figure(
             nrow, ncol, cell, grid.watercourses(), grid.drain_cells(),
             current_line=ss[f"{KEY}_line"], snap=snap, wells=grid.groups("wells"),
             ghbs=grid.groups("ghb"), zones=grid.zones(zone_values),
-            outlines=area_outlines(grid, values),
+            outlines=area_outlines(grid, values), walls=grid.walls(),
         )  # fmt: skip
         width, height = ncol * cell, nrow * cell
         bbox = model_bbox(values["origin_x"], values["origin_y"], width, height)
@@ -366,6 +456,14 @@ def draw_panel(
             )  # fmt: skip
             if target == NEW:
                 props = props_form(f"{KEY}_np", cell, values["surface"])
+        elif obj == "damwand":
+            target = st.selectbox(
+                "Damwand", [NEW, *[w["name"] for w in ss[f"{KEY}_walls"]]],
+                key=f"{KEY}_wall_target",
+                format_func=lambda n: "+ nieuwe damwand" if n == NEW else n,
+            )  # fmt: skip
+            if target == NEW:
+                props = wall_form(node_labels)
         elif obj in ("put", "ghb") and how == "toevoegen":
             props = group_form(obj, node_labels, values["surface"])
         elif obj == "zone" and how == "toevoegen":
@@ -389,7 +487,13 @@ def draw_panel(
             if st.button(
                 "Lijn afronden", type="primary", disabled=len(line) < 2, key=f"{KEY}_finish"
             ):
-                if target == NEW:
+                if obj == "damwand":
+                    walls = ss[f"{KEY}_walls"]
+                    if target == NEW:
+                        walls.append({**props, "lines": [list(line)]})
+                    else:
+                        next(w for w in walls if w["name"] == target)["lines"].append(list(line))
+                elif target == NEW:
                     wcs.append({**props, "lines": [list(line)], "points": set(), "manual": {},
                                 "manual_cell": cell})  # fmt: skip
                 else:

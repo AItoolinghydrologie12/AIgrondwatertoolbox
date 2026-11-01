@@ -90,3 +90,54 @@ def polyline_cell_lengths(
             row = min(int(ym // cell), nrow - 1)
             out[(row, col)] = out.get((row, col), 0.0) + (tb - ta) * seg_len
     return out
+
+
+# A cell face of a square grid: (row, col, "x") lies between (row, col) and (row, col + 1),
+# (row, col, "y") between (row, col) and (row + 1, col). Row 0 at the bottom (y = 0).
+Face = tuple[int, int, str]
+
+
+def outline_faces(cells: set[tuple[int, int]], nrow: int, ncol: int) -> tuple[Face, ...]:
+    """Faces around a set of cells (e.g. a building pit): every face between a cell of the
+    set and a neighbour outside it; the model edge is no face."""
+    faces: set[Face] = set()
+    for r, c in cells:
+        for dr, dc in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+            rn, cn = r + dr, c + dc
+            if (rn, cn) in cells or not (0 <= rn < nrow and 0 <= cn < ncol):
+                continue
+            faces.add((min(r, rn), min(c, cn), "x" if dr == 0 else "y"))
+    return tuple(sorted(faces))
+
+
+def polyline_faces(
+    vertices: list[tuple[float, float]], cell: float, nrow: int, ncol: int
+) -> tuple[Face, ...]:
+    """Faces along a polyline: each vertex snaps to the nearest cell corner, and between
+    corners the line follows the grid lines as a staircase, each step the one that stays
+    closest to the straight line (x first on a tie). Edges on the model boundary are no
+    faces."""
+    corners = [
+        (min(max(round(y / cell), 0), nrow), min(max(round(x / cell), 0), ncol))
+        for x, y in vertices
+    ]  # (i, j): grid line y = i cell, x = j cell
+    faces: list[Face] = []
+    for (i0, j0), (i1, j1) in zip(corners[:-1], corners[1:], strict=True):
+        i, j = i0, j0
+        di, dj = i1 - i0, j1 - j0
+        si, sj = (1 if di > 0 else -1), (1 if dj > 0 else -1)
+        while (i, j) != (i1, j1):
+            # distance of the next corner to the line (unnormalised): step in x or in y
+            off_x = abs((i - i0) * dj - (j + sj - j0) * di)
+            off_y = abs((i + si - i0) * dj - (j - j0) * di)
+            if j != j1 and (i == i1 or off_x <= off_y):
+                jn = j + sj
+                if 0 < i < nrow:  # horizontal edge: between rows i - 1 and i
+                    faces.append((i - 1, min(j, jn), "y"))
+                j = jn
+            else:
+                inext = i + si
+                if 0 < j < ncol:  # vertical edge: between columns j - 1 and j
+                    faces.append((min(i, inext), j - 1, "x"))
+                i = inext
+    return tuple(dict.fromkeys(faces))

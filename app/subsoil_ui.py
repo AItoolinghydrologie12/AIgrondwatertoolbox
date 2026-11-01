@@ -10,7 +10,7 @@ from draw_actions import new_zone
 from toolbox_state import DEFAULTS, KEY, bump, ss
 from ui_common import number, stack_inputs, zone_stack_inputs
 
-from gwproducten.core.layers import LayerStack
+from gwproducten.core.layers import SPLIT_RESISTANCE, SPLIT_THICKNESS, LayerStack, split_aquifer
 from gwproducten.products import peilopzet_grid as p3
 
 BOUNDARY_LABEL = {
@@ -59,6 +59,105 @@ def zone_inputs(base: LayerStack) -> dict[int, tuple[LayerStack, float]]:
         new_zone(ss, KEY)
         st.rerun()
     return out
+
+
+def write_stack(state: Any, prefix: str, stack: LayerStack) -> None:
+    """Layer values of ``stack`` into the widget keys ``{prefix}_{i}_d/_k/_a/_c/_kh``."""
+    for i, lay in enumerate(stack.layers):
+        k = f"{prefix}_{i}"
+        state[f"{k}_d"] = round(lay.thickness, 3)
+        if lay.kind == "pakket":
+            state[f"{k}_k"], state[f"{k}_a"] = lay.k_h, lay.anisotropy
+        else:
+            state[f"{k}_c"] = lay.c
+            if i == 0:
+                state[f"{k}_kh"] = lay.k_h
+
+
+def apply_split(state: Any, split: dict[str, Any]) -> None:
+    """Apply a split (prepared by :func:`_split_inputs`) before the widgets exist: the new
+    layer values of the base and the zones, and the layers of wells, GHB groups, walls and
+    the boundary per layer shifted one node down below the split."""
+    old_keys, new_keys, node = split["old_keys"], split["new_keys"], split["node"]
+    remap = {k: new_keys[j + (j > node)] for j, k in enumerate(old_keys)}
+    base: LayerStack = split["base"]
+    mode, n = base.top_mode, sum(lay.kind == "pakket" for lay in base.layers)
+    state[f"{KEY}_naq_{mode}"] = n
+    write_stack(state, f"{KEY}_{mode}", base)
+    for zid, zstack in split["zones"].items():
+        write_stack(state, f"{KEY}_z{zid}_{mode}_{n}", zstack)
+    for name in ("wells", "ghb", "walls"):
+        for g in state.get(f"{KEY}_{name}", []):
+            g["layer"] = remap.get(g["layer"], g["layer"])
+    for j in range(len(old_keys) - 1, -1, -1):  # bottom up: no value is overwritten too early
+        for field in ("bkind", "bh", "bfix"):
+            old = f"{KEY}_{field}_{old_keys[j]}"
+            if old in state:
+                state[f"{KEY}_{field}_{remap[old_keys[j]]}"] = state[old]
+                if j == node:  # the lower part keeps the boundary of the upper part
+                    state[f"{KEY}_{field}_{new_keys[node + 1]}"] = state[old]
+
+
+def _split_inputs(
+    stack: LayerStack, zone_values: dict[int, tuple[LayerStack, float]], surface: float
+) -> None:
+    """Split an aquifer at the tip of a sheet pile wall: the model lets a wall end at the
+    bottom of a whole layer."""
+    with st.expander("Pakket splitsen bij de punt van een damwand", expanded=False):
+        st.caption(
+            "Het model rekent met één rekenpunt per pakket. Eindigt een damwand halverwege een "
+            "pakket, splits het dan hier op de diepte van de punt: de app voegt een scheidende "
+            f"laag van {SPLIT_THICKNESS:g} m met c = {SPLIT_RESISTANCE:g} d in. Daarna laat je "
+            "de wand tot en met het bovenste deel lopen. Zones worden op dezelfde NAP-hoogte "
+            "gesplitst."
+        )
+        if stack.errors():
+            return
+        n = sum(lay.kind == "pakket" for lay in stack.layers)
+        tip = st.number_input(
+            "Punt van de damwand [m NAP]", -200.0, 50.0, round(surface - 10.0, 1), 0.5,
+            format="%g", key=f"{KEY}_split_tip",
+        )  # fmt: skip
+        depth = surface - tip
+        if not 0.0 < depth < stack.total_thickness:
+            st.info("Die hoogte ligt niet binnen de lagenopbouw.")
+            return
+        i = stack.layer_at_depth(depth)
+        lay = stack.layers[i]
+        if lay.kind != "pakket":
+            st.info(
+                f"De punt ligt in {lay.name} (scheidend): splitsen is niet nodig. Laat de wand "
+                "tot en met het pakket erboven lopen."
+            )
+            return
+        if n >= p3.MAX_AQUIFERS:
+            st.info(f"Er zijn al {p3.MAX_AQUIFERS} pakketten (het maximum).")
+            return
+        try:
+            new = split_aquifer(stack, i, depth + stack.z_top[i])
+        except ValueError as err:
+            st.info(str(err))
+            return
+        node = stack.node_of_layer(i)
+        upper, lower = new.layers[i].thickness, new.layers[i + 2].thickness
+        st.caption(
+            f"{lay.name} wordt {upper:.2f} m + {SPLIT_THICKNESS:g} m scheiding + {lower:.2f} m. "
+            f"Verticale weerstand tussen de delen: {new.node_resistances()[node]:.2f} d "
+            "(halve pakketten D/2kv plus de scheiding)."
+        )
+        if st.button("Splitsen", key=f"{KEY}_split_go", icon=":material/call_split:"):
+            zones = {}
+            for zid, (zstack, zsurface) in zone_values.items():
+                zl = zstack.layers[i]
+                at = zsurface - tip + zstack.z_top[i]  # depth below the top of that aquifer
+                at = min(max(at, SPLIT_THICKNESS), zl.thickness - 2 * SPLIT_THICKNESS)
+                zones[zid] = split_aquifer(zstack, i, at)
+            ss[f"{KEY}_split_pending"] = {
+                "base": new, "zones": zones, "node": node,
+                "old_keys": [nd.key for nd in stack.nodes],
+                "new_keys": [nd.key for nd in new.nodes],
+            }  # fmt: skip
+            st.rerun()
 
 
 def _surface_inputs(values: dict[str, Any]) -> None:
@@ -151,6 +250,10 @@ def subsoil_step(
 ) -> tuple[LayerStack, dict[int, tuple[LayerStack, float]], str, Any]:
     """Step 1; fills ``values``. Returns the base stack, the zone values, which schematic
     to draw ("basis" or a zone name) and the empty box for that schematic."""
+    pending = ss.pop(f"{KEY}_split_pending", None)
+    if pending is not None:  # prepared in the previous run, applied before the widgets exist
+        apply_split(ss, pending)
+        bump()
     col_in, col_fig = st.columns([2, 3], gap="large")
     with col_in:
         st.subheader("Lagenopbouw")
@@ -158,6 +261,7 @@ def subsoil_step(
             DEFAULTS, KEY, max_aquifers=p3.MAX_AQUIFERS, with_w=False, container=st.container()
         )
         zone_values = zone_inputs(stack)
+        _split_inputs(stack, zone_values, float(ss.get(f"{KEY}_mv", DEFAULTS.surface)))
     with col_fig:
         zone_names = [z["name"] for z in ss[f"{KEY}_zones"]]
         schematic_of = (
