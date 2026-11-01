@@ -161,7 +161,6 @@ BACKGROUNDS = {
     "top10nl": "topografie (TOP10NL)",
     "luchtfoto": "luchtfoto",
     "ahn": "hoogtekaart (AHN)",
-    "bgt": "BGT (tot ~1,2 km, trager)",
 }
 
 
@@ -179,7 +178,7 @@ def background(bbox: pdok.Bbox) -> tuple[str, float] | None:
     """The chosen background map for ``bbox`` as (data URI, opacity), or None (no location,
     'geen', or the service failed; a warning is shown then)."""
     kind = ss.get(f"{KEY}_bg", "geen")
-    if not located() or kind == "geen":
+    if not located() or kind not in pdok.BACKGROUND_SOURCE:
         return None
     try:
         uri = _background_uri(kind, bbox)
@@ -194,6 +193,8 @@ def background_inputs() -> None:
     if not located():
         st.caption("Achtergrondkaart: zet bij stap 1 een locatie aan.")
         return
+    if ss.get(f"{KEY}_bg") not in BACKGROUNDS:
+        ss[f"{KEY}_bg"] = "geen"  # e.g. a project saved with the former BGT choice
     c1, c2 = st.columns([3, 2])
     c1.selectbox("Achtergrondkaart", list(BACKGROUNDS), format_func=BACKGROUNDS.get,
                  key=f"{KEY}_bg")  # fmt: skip

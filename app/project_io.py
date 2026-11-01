@@ -15,7 +15,8 @@ VERSION = 1
 
 # input widgets, without the "p3_" prefix
 INPUT_PATTERNS = [
-    r"(sx|sy|cell|thr|gc|conv|engine|mv|rch|wmv|dd|dw|bnd|bh|kwel|phi|ck|mode_top|geo|cx|cy|bg|bg_op)",
+    r"(sx|sy|cell|thr|gc|conv|engine|mv|rch|wmv|dd|dw|bnd|bh|kwel|phi|ck|mode_top|geo|cx|cy|bg|bg_op|ws_on|ws_level)",
+    r"wd_(l1|l2|t1|t2|t3)",
     r"(bfix|bkind|bh)_[a-z0-9]+",
     r"naq_(deklaag|freatisch_zand)",
     r"(deklaag|freatisch_zand)_\d+_(d|k|c|kh|a)",

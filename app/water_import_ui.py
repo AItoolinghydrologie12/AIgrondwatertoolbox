@@ -1,6 +1,7 @@
-"""Import watercourses from TOP10NL (step 2): fetch, preview per width class, add as one
-watercourse per class. Levels and bottoms are not in TOP10NL; they get the defaults of a
-new watercourse and must be filled in."""
+"""Import watercourses (step 2): TOP10NL water plus, within WDODelta, the level areas
+(peilgebieden) and the legger. Fetch, preview per watercourse, then add. Levels come from the
+chosen level of each area; bottoms from the legger (mean of upstream and downstream) or
+level - water depth."""
 
 from __future__ import annotations
 
@@ -12,116 +13,209 @@ from grid_ui import centre_key
 from location_ui import located, model_bbox
 from toolbox_state import KEY, Grid, bump, ss
 
-from gwproducten.core.grids import polyline_cell_lengths
-from gwproducten.geo import water
-from gwproducten.geo.pdok import ServiceError
+from gwproducten.geo import import_water, water, waterschap
+from gwproducten.geo.pdok import Bbox, ServiceError
 
 TODO = " (peil invullen)"
+BOARD = waterschap.WDODELTA
+DEPTH_INPUTS = {  # import_water.DEPTHS key -> (widget key suffix, label)
+    "legger 1": ("l1", "Legger primair"),
+    "legger 2": ("l2", "Legger secundair"),
+    "0,5 - 3 meter": ("t1", "TOP10NL 0,5–3 m"),
+    "3 - 6 meter": ("t2", "TOP10NL 3–6 m"),
+    "breed": ("t3", "Breder / onbekend"),
+}
 
 
 @st.cache_data(ttl=24 * 3600, max_entries=20, show_spinner="Watergangen ophalen bij PDOK…")
-def _fetch(bbox: tuple[float, float, float, float]) -> list[water.Water]:
+def _fetch_top10(bbox: Bbox) -> list[water.Water]:
     return water.fetch_waterdelen(bbox)
 
 
-def watercourses_from_top10nl(
-    items: list[water.Water], grid: Grid, origin: tuple[float, float], surface: float
-) -> list[dict[str, Any]]:
-    """One watercourse dict per width class: lines as drawn lines (length per cell follows
-    the line), areas as cells with length = area in the cell / width."""
-    out = []
-    for label in sorted({w.width_class for w in items}, key=water.class_width):
-        group = [w for w in items if w.width_class == label]
-        width = water.class_width(label)
-        wc: dict[str, Any] = {
-            "name": f"TOP10NL {label.replace(' meter', ' m')}{TODO}", "kind": "riv",
-            "stage_ref": surface - 1.2, "stage_new": surface - 1.2, "bottom": surface - 1.6,
-            "width": width, "length": grid.cell, "entry_resistance": 1.0, "conductance": 0.0,
-            "lines": [], "points": set(), "manual": {}, "manual_cell": grid.cell,
-        }  # fmt: skip
-        for w in group:
-            if not w.area:
-                wc["lines"].append(water.to_local(w.parts[0], *origin))
-                continue
-            rings = [water.to_local(r, *origin) for r in w.parts]
-            for (r, c), length in water.polygon_cell_lengths(
-                rings, width, grid.cell, grid.nrow, grid.ncol
-            ).items():
-                key = centre_key(r, c, grid.cell)
-                wc["points"].add(key)
-                wc["manual"][key] = wc["manual"].get(key, 0.0) + length
-        out.append(wc)
-    return out
+@st.cache_data(ttl=24 * 3600, max_entries=20, show_spinner="Peilen en legger ophalen…")
+def _fetch_board(bbox: Bbox) -> tuple[list[waterschap.LevelArea], list[waterschap.Reach]]:
+    return waterschap.level_areas(bbox, BOARD), waterschap.reaches(bbox, BOARD)
 
 
-def _preview(items: list[water.Water], grid: Grid, origin: tuple[float, float]) -> pd.DataFrame:
-    rows = []
-    for label in sorted({w.width_class for w in items}, key=water.class_width):
-        group = [w for w in items if w.width_class == label]
-        length = 0.0
-        for w in group:
-            if w.area:
-                rings = [water.to_local(r, *origin) for r in w.parts]
-                cells = water.polygon_cell_lengths(
-                    rings, water.class_width(label), grid.cell, grid.nrow, grid.ncol
-                )
-            else:
-                local = water.to_local(w.parts[0], *origin)
-                cells = polyline_cell_lengths(local, grid.cell, grid.nrow, grid.ncol)
-            length += sum(cells.values())
-        rows.append(
+@st.cache_data(max_entries=20, show_spinner=False)
+def _combine(
+    top10: list[water.Water],
+    reaches: list[waterschap.Reach],
+    areas: list[waterschap.LevelArea],
+    origin: tuple[float, float],
+    grid: tuple[float, int, int],
+    choice: str,
+    depths: dict[str, float],
+    default_stage: float,
+) -> import_water.Result:
+    return import_water.combine(
+        top10, reaches, areas, origin, grid, choice=choice, depths=depths,
+        default_stage=default_stage,
+    )  # fmt: skip
+
+
+def group_name(g: import_water.Group, taken: set[str]) -> str:
+    """Unique name: source and level area; with width and bottom when that is not unique,
+    then a number. '(peil invullen)' stays at the end for watercourses without an area."""
+    base = g.source.replace(" meter", " m")
+    area = f" · gebied {g.area} ({g.stage:.2f})" if g.area is not None else ""
+    end = "" if g.area is not None else TODO
+    for name in (
+        f"{base}{area}{end}",
+        f"{base}{area} · b {g.width:g} m, bodem {g.bottom:.2f}{end}",
+        *(f"{base}{area} · b {g.width:g} m, bodem {g.bottom:.2f} #{k}{end}" for k in range(2, 999)),
+    ):
+        if name not in taken:
+            taken.add(name)
+            return name
+    raise ValueError("geen unieke naam")
+
+
+def watercourse(g: import_water.Group, cell: float, taken: set[str]) -> dict[str, Any]:
+    """Watercourse dict of the drawing state: lines as drawn lines (length per cell follows
+    the line), area water as cells with their length."""
+    wc: dict[str, Any] = {
+        "name": group_name(g, taken), "kind": "riv", "stage_ref": round(g.stage, 3),
+        "stage_new": round(g.stage, 3), "bottom": round(g.bottom, 3), "width": g.width,
+        "length": cell, "entry_resistance": 1.0, "conductance": 0.0,
+        "lines": [list(ln) for ln in g.lines], "points": set(), "manual": {},
+        "manual_cell": cell,
+    }  # fmt: skip
+    for (r, c), length in g.cells.items():
+        key = centre_key(r, c, cell)
+        wc["points"].add(key)
+        wc["manual"][key] = length
+    return wc
+
+
+def _preview(groups: list[import_water.Group]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
             {
-                "Breedteklasse": label,
-                "Soort": "vlak" if group[0].area else "lijn",
-                "Aantal": len(group),
-                "Lengte in model [m]": round(length),
-                "Breedte [m]": water.class_width(label),
+                "Watergang": g.source, "Peilgebied": g.area or "–",
+                "Peil [m NAP]": round(g.stage, 2), "Bodem [m NAP]": round(g.bottom, 2),
+                "Bodem uit": (
+                    "legger, aangepast" if g.bottom_adjusted
+                    else "legger" if g.bottom_from_legger else "aanname"
+                ),
+                "Breedte [m]": g.width, "Lengte [m]": round(g.length),
             }
-        )
-    return pd.DataFrame(rows)
+            for g in groups
+        ]
+    )  # fmt: skip
+
+
+def _options() -> tuple[bool, str, dict[str, float]]:
+    use_board = st.toggle(
+        f"Peilen en legger van het waterschap ({BOARD.name})", value=True, key=f"{KEY}_ws_on",
+        help="Peil uit de peilgebiedenkaart; primaire en secundaire watergangen met breedte en "
+        "bodem uit de legger. Alleen binnen WDODelta; daarbuiten vul je het peil zelf in.",
+    )  # fmt: skip
+    c1, c2 = st.columns([1, 2])
+    choice = c1.selectbox(
+        "Peil", waterschap.LEVELS, index=1, format_func=waterschap.LEVEL_LABEL.get,
+        key=f"{KEY}_ws_level", disabled=not use_board,
+    )  # fmt: skip
+    c2.caption(
+        "Peil na opzet = dit peil; een opzet stel je daarna in de tabel in. Ontbreekt het "
+        "gekozen peil, dan neemt de app winter- (bij min) of zomerpeil (bij max)."
+    )
+    depths = {}
+    with st.expander("Waterdiepte waar de legger geen bodem geeft (aanname)", expanded=False):
+        cols = st.columns(len(DEPTH_INPUTS))
+        for col, (name, (suffix, label)) in zip(cols, DEPTH_INPUTS.items(), strict=True):
+            depths[name] = col.number_input(
+                f"{label} [m]", 0.05, 10.0, import_water.DEPTHS[name], 0.05, format="%g",
+                key=f"{KEY}_wd_{suffix}",
+            )  # fmt: skip
+        st.caption("Bodem = peil − waterdiepte.")
+    return use_board, choice, depths
 
 
 def import_inputs(grid: Grid, values: dict[str, Any]) -> None:
-    with st.expander("Watergangen ophalen uit TOP10NL (Kadaster)", expanded=False):
+    with st.expander("Watergangen ophalen (TOP10NL, peilen en legger)", expanded=False):
         if not located():
             st.caption("Zet bij stap 1 een locatie aan om watergangen op te halen.")
             return
         origin = (values["origin_x"], values["origin_y"])
         bbox = model_bbox(*origin, grid.ncol * grid.cell, grid.nrow * grid.cell)
         st.caption(
-            "Haalt de watergangen in het modelgebied op: hartlijnen van sloten (0,5–3 m en "
-            "3–6 m) en vlakken van bredere wateren; duikers vallen weg. Peil en bodem staan "
-            "niet in TOP10NL: die vul je daarna zelf in. Kleine greppels ontbreken."
+            "Haalt de watergangen in het modelgebied op: primaire en secundaire uit de legger "
+            "van het waterschap, de overige uit TOP10NL (hartlijnen 0,5–3 en 3–6 m, vlakken "
+            "van bredere wateren; duikers vallen weg). Elk stuk krijgt het peil van zijn "
+            "peilgebied. Kleine greppels ontbreken in TOP10NL."
         )
+        use_board, choice, depths = _options()
         if st.button("Ophalen", key=f"{KEY}_top10_get", icon=":material/water:"):
+            fetched: dict[str, Any] = {"bbox": bbox, "top10": [], "areas": [], "reaches": []}
             try:
-                ss[f"{KEY}_top10"] = (bbox, _fetch(bbox))
+                fetched["top10"] = _fetch_top10(bbox)
             except ServiceError as err:
                 st.warning(str(err))
+            if use_board:
+                try:
+                    fetched["areas"], fetched["reaches"] = _fetch_board(bbox)
+                except ServiceError as err:
+                    st.warning(f"{err} Alleen TOP10NL; peil zelf invullen.")
+                if not fetched["areas"]:
+                    st.info(
+                        f"Geen peilgebieden van {BOARD.name} in dit gebied: het peil vul je "
+                        "zelf in (standaard maaiveld − 1,2 m)."
+                    )
+            ss[f"{KEY}_top10"] = fetched
         fetched = ss.get(f"{KEY}_top10")
-        if not fetched or fetched[0] != bbox:
+        if not fetched or fetched["bbox"] != bbox:
             return
-        items = fetched[1]
-        if not items:
+        areas = fetched["areas"] if use_board else []
+        reaches = fetched["reaches"] if use_board else []
+        if not fetched["top10"] and not reaches:
             st.info("Geen watergangen gevonden in dit gebied.")
             return
-        st.dataframe(_preview(items, grid, origin), hide_index=True)
+        result = _combine(
+            fetched["top10"], reaches, areas, origin, (grid.cell, grid.nrow, grid.ncol),
+            choice, depths, values["surface"] - 1.2,
+        )  # fmt: skip
+        legger = sum(g.bottom_from_legger for g in result.groups)
+        st.dataframe(_preview(result.groups), hide_index=True)
+        st.caption(
+            f"{len(result.groups)} watergangen; bodem uit de legger bij {legger}, aangenomen "
+            "(peil − waterdiepte) bij de rest."
+        )
+        for note in result.notes:
+            st.info(note)
         if st.button("Toevoegen als watergangen", type="primary", key=f"{KEY}_top10_add"):
-            new = watercourses_from_top10nl(items, grid, origin, values["surface"])
-            ss[f"{KEY}_wcs"].extend(new)
+            taken = {wc["name"] for wc in ss[f"{KEY}_wcs"]}
+            ss[f"{KEY}_wcs"].extend(watercourse(g, grid.cell, taken) for g in result.groups)
+            ss[f"{KEY}_areas"] = (bbox, areas)
             ss.pop(f"{KEY}_top10")
             bump()
             st.rerun()
-        st.caption(f"Bron: {water.SOURCE}.")
+        sources = [water.SOURCE] + ([BOARD.source] if use_board else [])
+        st.caption("Bron: " + "; ".join(sources) + ".")
+
+
+def area_outlines(grid: Grid, values: dict[str, Any]) -> list[list[tuple[float, float]]]:
+    """Borders of the fetched level areas in model metres (for the drawing map)."""
+    origin = (values.get("origin_x", 0.0), values.get("origin_y", 0.0))
+    bbox = model_bbox(*origin, grid.ncol * grid.cell, grid.nrow * grid.cell)
+    stored = ss.get(f"{KEY}_areas")
+    fetched = ss.get(f"{KEY}_top10")
+    if fetched and fetched["bbox"] == bbox:
+        areas = fetched["areas"]
+    elif stored and stored[0] == bbox:
+        areas = stored[1]
+    else:
+        return []
+    return [water.to_local(ring, *origin) for a in areas for ring in a.rings]
 
 
 def import_notice() -> None:
-    """Reminder after an import: levels and bottoms are defaults."""
+    """Reminder after an import: levels outside level areas are defaults."""
     names = [wc["name"] for wc in ss[f"{KEY}_wcs"] if wc["name"].endswith(TODO)]
     if names:
         st.warning(
-            "Peil en bodem van de geïmporteerde watergangen zijn standaardwaarden (maaiveld "
-            "− 1,2 m en − 1,6 m). Vul ze in de tabel hieronder in en haal '(peil invullen)' "
-            f"uit de naam als ze kloppen: {', '.join(names)}.",
+            "Het peil van deze geïmporteerde watergangen is een standaardwaarde (maaiveld − 1,2 "
+            "m; bodem = peil − waterdiepte). Vul peil en bodem in de tabel hieronder in en haal "
+            f"'(peil invullen)' uit de naam als ze kloppen: {', '.join(names)}.",
             icon=":material/edit:",
         )
