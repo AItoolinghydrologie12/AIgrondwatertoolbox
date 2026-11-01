@@ -426,3 +426,26 @@ def test_drawing_figure_cells_are_compact_and_in_place() -> None:
     assert len(fig.to_json()) < 600_000  # as sent by Streamlit (typed arrays)
     empty = drawing_figure(n, n, cell, [], ())
     assert not [t for t in empty.data if t.type == "heatmap"]  # no drains: no layer
+
+
+def test_grid_product_location_sets_rd_origin() -> None:
+    """With a location the lower-left RD corner goes into Params (MF6 export); without it
+    the model stays in local metres. The location is saved in the project."""
+    import sys
+
+    sys.path.insert(0, str(APP))
+    from project_io import export_project
+
+    page = str(APP / "pages" / "1_Grondwatertoolbox.py")
+    at = AppTest.from_file(page, default_timeout=120).run()
+    at.button(key="p3_calc").click().run()
+    assert at.session_state["p3_result"]["params"].origin_x == 0.0
+    at.toggle(key="p3_geo").set_value(True).run()
+    at.number_input(key="p3_cx").set_value(136800.0).run()
+    at.number_input(key="p3_cy").set_value(455900.0).run()
+    at.button(key="p3_calc").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    params = at.session_state["p3_result"]["params"]
+    assert (params.origin_x, params.origin_y) == (136300.0, 455400.0)  # centre - 500 m
+    saved = export_project(at.session_state, "p3")["invoer"]
+    assert saved["geo"] is True and saved["cx"] == 136800.0 and saved["cy"] == 455900.0

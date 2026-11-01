@@ -117,8 +117,8 @@ def ensure_mf6(timeout: float = 300.0) -> str | None:
 
 def _layers(params: p3.Params) -> tuple[np.ndarray, list[np.ndarray], list[dict], list[int]]:
     """MF6 top, bottoms, per-layer properties (k, k33, convertible) and the MF6 layer of
-    every app node."""
-    zmap = p3.zone_map(params)
+    every app node. Rows north first (MODFLOW 6 row 1 = north edge), see :func:`_north_up`."""
+    zmap = _north_up(p3.zone_map(params))
     cols = p3.columns(params)
     clay_top = params.stack.top_mode == "deklaag"
 
@@ -158,6 +158,12 @@ def _layers(params: p3.Params) -> tuple[np.ndarray, list[np.ndarray], list[dict]
     return top, bottoms, props, node_layer
 
 
+def _north_up(a: np.ndarray) -> np.ndarray:
+    """App rows run south to north (row 0 at y = 0); MODFLOW 6 rows north to south. The same
+    flip turns app arrays into MF6 arrays and back (last two axes: row, column)."""
+    return a[..., ::-1, :]
+
+
 def _pname(k: int, name: str) -> str:
     return f"b{k}_" + re.sub(r"[^a-z0-9]", "", name.lower())[:10]
 
@@ -192,7 +198,7 @@ def build(
     )
     flopy.mf6.ModflowGwfdis(
         gwf, nlay=len(bottoms), nrow=nr, ncol=nc, delr=params.cell, delc=params.cell,
-        top=top, botm=bottoms,
+        top=top, botm=bottoms, xorigin=params.origin_x, yorigin=params.origin_y,
     )  # fmt: skip
     flopy.mf6.ModflowGwfnpf(
         gwf, icelltype=[int(p["convertible"]) for p in props], k=[p["k"] for p in props],
@@ -203,7 +209,7 @@ def build(
 
     def cell(key: int) -> tuple[int, int, int]:
         n, r, col = np.unravel_index(key, (nl, nr, nc))
-        return (node_layer[n], int(r), int(col))
+        return (node_layer[n], nr - 1 - int(r), int(col))
 
     names: dict[str, str] = {}
     for k, b in enumerate(boundaries):
@@ -277,7 +283,7 @@ def solve(
         ok, _ = sim.run_simulation(silent=True)
         if not ok:
             continue
-        all_heads = sim.get_model("gwt").output.head().get_data()
+        all_heads = _north_up(sim.get_model("gwt").output.head().get_data())
         heads = np.array([all_heads[layer] for layer in node_layer])
         if np.any(np.abs(heads) > 1e20):  # HDRY: cells switched off as dry
             continue
@@ -352,11 +358,21 @@ Lagen (van boven naar beneden):
 {layers}
 
 Eenheden: meter en dag. Rooster: {nrow} rijen x {ncol} kolommen, cel {cell:g} m; rij 1 is
-de zuidrand van de app-kaart. Neerslag {recharge:g} m/d.
+de noordrand van de app-kaart (zoals gebruikelijk in MODFLOW 6). {origin}
+Neerslag {recharge:g} m/d.
 Watergangen (RIV), drains (DRN), GHB-groepen en putten (WEL) staan elk in een eigen pakket,
 genoemd naar de groep in de app. De conductances zijn door de app berekend (Ernst met
 kv/kh, celgrootte-correctie De Lange). Transmissiviteit: {conv}.
 """
+
+
+def _origin_text(params: p3.Params) -> str:
+    if params.origin_x == 0.0 and params.origin_y == 0.0:
+        return "Het model heeft geen locatie: XORIGIN/YORIGIN zijn 0 (lokale meters)."
+    return (
+        f"Linksonder (XORIGIN, YORIGIN in DIS) = RD x {params.origin_x:.0f}, y "
+        f"{params.origin_y:.0f} m (EPSG:28992), zodat het model in GIS op zijn plek ligt."
+    )
 
 
 def model_zip(params: p3.Params) -> bytes:
@@ -373,7 +389,7 @@ def model_zip(params: p3.Params) -> bytes:
     )
     text = README_TEXT.format(
         layers=layers, nrow=params.nrow, ncol=params.ncol, cell=params.cell,
-        recharge=params.recharge,
+        recharge=params.recharge, origin=_origin_text(params),
         conv="volgt de natte dikte (ICELLTYPE 1)" if params.convertible else "vast",
     )  # fmt: skip
     buffer = io.BytesIO()
@@ -399,5 +415,5 @@ def run(params: p3.Params, stage: str, workspace: Path, newton: bool = False) ->
     ok, out = sim.run_simulation(silent=True)
     if not ok:
         raise RuntimeError("MODFLOW 6 is niet geconvergeerd:\n" + "\n".join(out[-20:]))
-    heads = sim.get_model("gwt").output.head().get_data()
+    heads = _north_up(sim.get_model("gwt").output.head().get_data())
     return np.array([heads[layer] for layer in node_layer])
