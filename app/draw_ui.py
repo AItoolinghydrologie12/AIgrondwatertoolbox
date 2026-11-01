@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from draw_actions import NEW, apply_selection
-from grid_ui import add_background, centre_key, drawing_figure
+from grid_ui import add_background, centre_key, drawing_figure, line_snap
 from location_ui import background, background_caption, background_inputs, model_bbox
 from streamlit.errors import StreamlitAPIException
 from toolbox_state import DEFAULT_RADIUS, KEY, MAP_CONFIG, Grid, bump, example, reset, ss
@@ -316,7 +316,7 @@ def draw_panel(
                 format_func={"toevoegen": "cellen toevoegen", "verwijderen": "cellen weghalen"}.get,
             )  # fmt: skip
     line_mode = obj == "watergang" and how == "lijn"
-    snap = max(cell / 5.0, max(values["size_x"], values["size_y"]) / 200.0) if line_mode else None
+    snap = line_snap(cell, values["size_x"], values["size_y"]) if line_mode else None
 
     with col_map:
         fig_draw = drawing_figure(

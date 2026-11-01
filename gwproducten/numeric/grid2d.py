@@ -7,7 +7,8 @@ MODFLOW-style head-dependent boundaries:
 - ``drn``: flux C (level - h) while h > level, else 0;
 - ``ghb``: flux C (stage - h), always active;
 
-plus fixed fluxes (wells) and an outer ring of fixed heads per layer.
+plus fixed fluxes (wells), an outer ring of fixed heads per layer, and horizontal flow
+barriers (sheet pile walls) on cell faces, as the MODFLOW 6 HFB package.
 
 The on/off switching is solved by Picard iteration: solve, update every state, repeat until
 no state changes. A layer can be *convertible* (MODFLOW 6 ICELLTYPE > 0): its transmissivity
@@ -103,6 +104,89 @@ class FluxBoundary:
 
 
 @dataclass(frozen=True)
+class Barrier:
+    """Horizontal flow barrier on cell faces of one layer (MODFLOW 6 HFB): in series with the
+    face conductance C comes C_w = hydchr * b * dy, b = mean thickness of the two cells (the
+    saturated thickness for a convertible layer); hydchr = 1/c_w [1/d], 0 = impermeable.
+    ``a`` and ``b``: flat cell indices (row * ncol + col) of the neighbours on both sides;
+    ``height``: (2, n) full layer thickness [m] in ``a`` and ``b``."""
+
+    name: str
+    layer: int
+    a: np.ndarray
+    b: np.ndarray
+    hydchr: np.ndarray
+    height: np.ndarray
+
+
+def _barrier_conductance(
+    bar: Barrier, C: np.ndarray, t: np.ndarray, conv: Convertible | None, cell: float
+) -> np.ndarray:
+    """Face conductance with the barrier in series; ``C`` the face conductance without it,
+    ``t`` (nrow, ncol) transmissivity of the layer."""
+    if conv is None:
+        b = 0.5 * (bar.height[0] + bar.height[1])
+    else:  # T = k b_sat: the saturated thickness of the current transmissivity
+        k = np.broadcast_to(np.asarray(conv.k, float), t.shape).ravel()
+        b = 0.5 * (t.ravel()[bar.a] / k[bar.a] + t.ravel()[bar.b] / k[bar.b])
+    Cw = bar.hydchr * b * cell
+    return np.where(bar.hydchr > 0, C * Cw / np.maximum(C + Cw, 1e-300), 0.0)
+
+
+def _faces(bar: Barrier, ncol: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """(row, col, along x) of every face: ``cx[row, col]`` or ``cy[row, col]``."""
+    r, col = np.divmod(np.minimum(bar.a, bar.b), ncol)
+    return r, col, np.abs(bar.b - bar.a) == 1
+
+
+def face_conductances(
+    t: np.ndarray, layer: int, barriers: Sequence[Barrier], conv: Convertible | None, cell: float
+) -> tuple[np.ndarray, np.ndarray]:
+    """Conductances of the faces between (r, c) and (r, c + 1) (``cx``) and between (r, c)
+    and (r + 1, c) (``cy``) of one layer with transmissivity ``t`` (nrow, ncol): square cells,
+    T dy/dx = T, harmonic mean; the barriers of this layer applied in order."""
+    cx = _harmonic(t[:, :-1], t[:, 1:])
+    cy = _harmonic(t[:-1, :], t[1:, :])
+    for bar in barriers:
+        if bar.layer != layer:
+            continue
+        r, col, along_x = _faces(bar, t.shape[1])
+        C = np.empty(r.size)
+        C[along_x] = cx[r[along_x], col[along_x]]
+        C[~along_x] = cy[r[~along_x], col[~along_x]]
+        C = _barrier_conductance(bar, C, t, conv, cell)
+        cx[r[along_x], col[along_x]] = C[along_x]
+        cy[r[~along_x], col[~along_x]] = C[~along_x]
+    return cx, cy
+
+
+def barrier_flows(
+    barriers: Sequence[Barrier],
+    heads: np.ndarray,
+    transmissivity: np.ndarray,
+    convertible: Sequence[Convertible | None],
+    cell: float,
+) -> tuple[np.ndarray, ...]:
+    """Flow from side ``a`` to side ``b`` [m3/d] per face of every barrier, for heads and
+    transmissivities (n_layers, nrow, ncol)."""
+    conv = list(convertible) + [None] * (len(heads) - len(convertible))
+    faces = {
+        layer: face_conductances(transmissivity[layer], layer, barriers, conv[layer], cell)
+        for layer in {bar.layer for bar in barriers}
+    }
+    flows = []
+    for bar in barriers:
+        cx, cy = faces[bar.layer]
+        r, col, along_x = _faces(bar, heads.shape[2])
+        C = np.empty(r.size)
+        C[along_x] = cx[r[along_x], col[along_x]]
+        C[~along_x] = cy[r[~along_x], col[~along_x]]
+        h = heads[bar.layer].ravel()
+        flows.append(C * (h[bar.a] - h[bar.b]))
+    return tuple(flows)
+
+
+@dataclass(frozen=True)
 class Convertible:
     """Layer whose transmissivity follows the saturated thickness (MODFLOW 6 convertible):
     T = k (min(h, top) - bottom), at least ``MIN_SATURATED_FRACTION`` of the thickness.
@@ -140,6 +224,7 @@ class GridSolution:
     flux_response: np.ndarray | None  # head change by the fixed fluxes alone (frozen states)
     transmissivity: np.ndarray  # (n_layers, nrow, ncol) [m2/d] of the final solve
     dry: np.ndarray  # (n_layers, nrow, ncol): convertible cells at the minimum thickness
+    barrier_flow: tuple[np.ndarray, ...] = ()  # per barrier: flow a -> b per face [m3/d]
 
 
 def _harmonic(a: np.ndarray, b: np.ndarray) -> np.ndarray:
@@ -162,6 +247,7 @@ def solve_grid(
     initial_active: dict[str, np.ndarray] | None = None,
     factorization: Factorization | None = None,
     convertible: Sequence[Convertible | None] = (),
+    barriers: Sequence[Barrier] = (),
 ) -> GridSolution:
     """``T`` per layer and ``c`` between layers: a number, or an (nrow, ncol) array for a
     subsoil that varies per cell.
@@ -172,7 +258,8 @@ def solve_grid(
     ``initial_active``: starting state per group (default: all on), e.g. the final states
     of a previous run. ``factorization``: shared LU cache, only for runs on the same grid.
     ``convertible``: per layer a :class:`Convertible` or None (fixed); for a convertible
-    layer ``T`` is only the starting value."""
+    layer ``T`` is only the starting value. ``barriers``: horizontal flow barriers on cell
+    faces, applied in order (two on the same face act in series)."""
     factorization = factorization or Factorization()
     nl = len(T)
     n = nl * nrow * ncol
@@ -196,9 +283,10 @@ def solve_grid(
             np.add.at(diag, a, cond)
             np.add.at(diag, b, cond)
 
-        for layer, t in enumerate(t_layers):  # square cells: T dy/dx = T; harmonic mean
-            link(idx[layer, :, :-1], idx[layer, :, 1:], _harmonic(t[:, :-1], t[:, 1:]))
-            link(idx[layer, :-1, :], idx[layer, 1:, :], _harmonic(t[:-1, :], t[1:, :]))
+        for layer, t in enumerate(t_layers):
+            cx, cy = face_conductances(t, layer, barriers, conv[layer], cell)
+            link(idx[layer, :, :-1], idx[layer, :, 1:], cx)
+            link(idx[layer, :-1, :], idx[layer, 1:, :], cy)
         for layer, ci in enumerate(c):
             link(idx[layer], idx[layer + 1], area / np.broadcast_to(np.asarray(ci, float), shape))
         return sp.csr_matrix(
@@ -330,6 +418,7 @@ def solve_grid(
         dh[free] = factorization.solve(M[free][:, free].tocsc(), rhs_fixed_flux[free])
         response = dh.reshape(nl, nrow, ncol)
 
+    flows = barrier_flows(barriers, h.reshape(nl, nrow, ncol), t_cur, conv, cell)
     total_recharge = recharge * area * top_free.size
     terms = np.array([total_recharge, lateral, *flux_out.values()])
     error = abs(terms.sum()) / max(np.abs(terms).sum() / 2.0, 1e-300)
@@ -350,6 +439,7 @@ def solve_grid(
                 for cv, hl in zip(conv, h.reshape(nl, nrow, ncol), strict=True)
             ]
         ),
+        barrier_flow=flows,
     )
 
 

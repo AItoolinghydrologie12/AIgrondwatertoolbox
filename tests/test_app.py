@@ -410,11 +410,12 @@ def test_drawing_figure_cells_are_compact_and_in_place() -> None:
     import numpy as np
 
     sys.path.insert(0, str(APP))
-    from grid_ui import drawing_figure
+    from grid_ui import drawing_figure, line_snap
 
     cell, n = 10.0, 100
     wc = {"name": "w", "cells": ((5, 40), (6, 40), (6, 41)), "lengths": (10.0, 4.0, 6.0)}
-    snap = max(cell / 5.0, n * cell / 200.0)  # as on the page
+    snap = line_snap(cell, n * cell, n * cell)
+    assert snap == 10.0  # 101 x 101 click points on a 1 km model
     fig = drawing_figure(n, n, cell, [wc], ((50, 50),), snap=snap)
     heat = [t for t in fig.data if t.type == "heatmap"]
     assert [t.name for t in heat] == ["buisdrainage", "w"]
@@ -423,7 +424,7 @@ def test_drawing_figure_cells_are_compact_and_in_place() -> None:
     assert z.shape == (2, 2)  # rows 5-6, columns 40-41
     assert (w.x0, w.y0, w.dx, w.dy) == (405.0, 55.0, cell, cell)  # centre of cell (5, 40)
     assert z[0, 0] == 10.0 and z[1, 0] == 4.0 and z[1, 1] == 6.0 and np.isnan(z[0, 1])
-    assert len(fig.to_json()) < 600_000  # as sent by Streamlit (typed arrays)
+    assert len(fig.to_json()) < 200_000  # as sent by Streamlit (typed arrays)
     empty = drawing_figure(n, n, cell, [], ())
     assert not [t for t in empty.data if t.type == "heatmap"]  # no drains: no layer
 

@@ -17,6 +17,7 @@ GHB_COLOR = "#17becf"
 WELL_COLOR = "#111111"
 THRESHOLD_COLOR = "#d62828"
 MAX_LEGEND = 8  # watercourses in the legend; more would push the map away
+SNAP_POINTS = 100  # click points along the longest side when drawing a line
 ZONE_COLORS = ("#c9a227", "#6a994e", "#bc4749", "#577590", "#9d4edd")
 
 
@@ -67,6 +68,12 @@ def wc_geometry(
                 lengths[(r, c)] = wc["manual"][key]
     cells = tuple(sorted(rc for rc, length in lengths.items() if length > 1e-9))
     return cells, tuple(lengths[rc] for rc in cells)
+
+
+def line_snap(cell: float, size_x: float, size_y: float) -> float:
+    """Spacing of the click points for drawing a line: a fifth of a cell, but at most
+    SNAP_POINTS along the longest side (the points go to the browser on every rerun)."""
+    return max(cell / 5.0, max(size_x, size_y) / SNAP_POINTS)
 
 
 def drawing_figure(

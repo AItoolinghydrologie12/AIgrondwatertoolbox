@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from gwproducten.core.grids import outline_faces, polyline_faces
 from gwproducten.core.layers import LayerStack, build_layers
 from gwproducten.products import peilopzet_grid as p3
 from gwproducten.products.peilopzet_grid import mf6
@@ -54,6 +55,21 @@ CASES = {
     "put in het zuidoosten, RD-locatie (rijvolgorde MF6)": p3.Params(
         wells=(p3.WellGroup("bem", ((4, 33),), "pakket1", 0.0, 100.0),),
         origin_x=155000.0, origin_y=463000.0,
+    ),
+    "damwanden: lekkende bouwput tot pakket 1, ondoorlatend scherm freatisch": p3.Params(
+        wells=(p3.WellGroup("bem", ((19, 19),), "pakket1", 0.0, 150.0),),
+        walls=(
+            p3.Wall("bouwput", outline_faces({(r, c) for r in range(18, 22)
+                                              for c in range(18, 22)}, 40, 40), "pakket1", 50.0),
+            p3.Wall("scherm", polyline_faces([(500.0, 100.0), (500.0, 300.0), (700.0, 400.0)],
+                                             25.0, 40, 40), "freatisch", None, reference=True),
+        ),
+    ),
+    "damwand in een deklaag tot pakket 1 (dunne MF6-toplaag)": p3.Params(
+        stack=CLAY, wells=(p3.WellGroup("bem", ((20, 20),), "pakket1", 0.0, 300.0),),
+        walls=(p3.Wall("bouwput", outline_faces({(r, c) for r in range(19, 23)
+                                                 for c in range(19, 23)}, 40, 40), "pakket1",
+                       20.0),),
     ),
 }  # fmt: skip
 
@@ -103,6 +119,9 @@ def test_compute_with_mf6_engine_equals_own_solver(name: str) -> None:
         assert np.max(np.abs(mf.well_drawdown - own.well_drawdown)) < 1e-4
         assert np.allclose(mf.wells.select_dtypes("number"), own.wells.select_dtypes("number"),
                            atol=1e-4, equal_nan=True)  # fmt: skip
+    if own.walls is not None:
+        assert np.allclose(mf.walls.select_dtypes("number"), own.walls.select_dtypes("number"),
+                           atol=1e-4 * scale)  # fmt: skip
     strip = [w for w in own.warnings if "geconvergeerd" not in w]
     assert [w for w in mf.warnings if "geconvergeerd" not in w] == strip
 

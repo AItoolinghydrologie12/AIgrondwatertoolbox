@@ -5,7 +5,8 @@ Every layer is an MF6 model layer, aquitards included (K33 = D/c, negligible hor
 so MF6 resolves the quasi-3D resistances itself. A clay top layer (deklaag) becomes a thin
 top layer that carries the phreatic level and the clay transmissivity, on top of the clay:
 then the full c lies between the water table and pakket 1, as in the app. The boundaries are
-the app's own groups (RIV, DRN, GHB, WEL, CHD) with identical conductances.
+the app's own groups (RIV, DRN, GHB, WEL, CHD) with identical conductances; sheet pile
+walls are an HFB package (hydraulic characteristic 1/c_w, 0 = impermeable).
 
 Needs ``flopy`` and the ``mf6`` executable. Windows: ``get-modflow :flopy``. Linux (the
 cloud server): :func:`ensure_mf6` downloads one fixed release from GitHub once and checks it
@@ -26,7 +27,14 @@ from pathlib import Path
 
 import numpy as np
 
-from gwproducten.numeric.grid2d import Convertible, FluxBoundary, GridSolution, HeadBoundary
+from gwproducten.numeric.grid2d import (
+    Barrier,
+    Convertible,
+    FluxBoundary,
+    GridSolution,
+    HeadBoundary,
+    barrier_flows,
+)
 from gwproducten.products import peilopzet_grid as p3
 
 THIN_TOP = 0.01  # [m] thickness of the layer that carries the phreatic level in a clay top
@@ -175,9 +183,10 @@ def build(
     fixed: tuple[float | None, ...],
     workspace: Path,
     newton: bool = False,
+    barriers: list[Barrier] = (),  # type: ignore[assignment]
 ) -> tuple[object, list[int], dict[str, str]]:
-    """Write the MF6 simulation for one run (the app's boundary groups, wells and fixed
-    ring). Returns the simulation, the MF6 layer of every app node and package name -> group
+    """Write the MF6 simulation for one run (the app's boundary groups, wells, fixed ring and
+    walls). Returns the simulation, the MF6 layer of every app node and package name -> group
     name."""
     import flopy
 
@@ -238,6 +247,17 @@ def build(
     ]
     if chd:
         flopy.mf6.ModflowGwfchd(gwf, stress_period_data=chd, pname="chd")
+    hfb = []
+    thin = params.stack.top_mode == "deklaag"
+    for bar in barriers:
+        for a, b, hc, ha, hb in zip(bar.a, bar.b, bar.hydchr, *bar.height, strict=True):
+            if thin and bar.layer == 0:  # MF6 face height is the thin layer: same C_w
+                hc = hc * 0.5 * (ha + hb) / THIN_TOP
+            ca = cell(int(bar.layer * nr * nc + a))
+            cb = cell(int(bar.layer * nr * nc + b))
+            hfb.append((ca, cb, float(hc)))
+    if hfb:
+        flopy.mf6.ModflowGwfhfb(gwf, stress_period_data=hfb, maxhfb=len(hfb), pname="hfb")
     flopy.mf6.ModflowGwfoc(gwf, head_filerecord="gwt.hds", saverecord=[("HEAD", "ALL")])
     return sim, node_layer, names
 
@@ -271,6 +291,7 @@ def solve(
     T: list[np.ndarray],
     convertible: list[Convertible | None],
     workspace: Path,
+    barriers: list[Barrier] = (),  # type: ignore[assignment]
 ) -> tuple[GridSolution, bool]:
     """One run with MODFLOW 6, as a :class:`GridSolution` (same fields as the app's solver).
     First the standard formulation (identical to the app); with dry cells or no convergence
@@ -278,7 +299,7 @@ def solve(
     nl, nr, nc = len(params.stack.nodes), params.nrow, params.ncol
     for newton in (False, True):
         ws = workspace / ("newton" if newton else "standaard")
-        sim, node_layer, names = build(params, boundaries, fluxes, fixed, ws, newton)
+        sim, node_layer, names = build(params, boundaries, fluxes, fixed, ws, newton, barriers)
         sim.write_simulation(silent=True)
         ok, _ = sim.run_simulation(silent=True)
         if not ok:
@@ -325,6 +346,7 @@ def solve(
         heads=heads, fluxes=fluxes_out, recharge=recharge, lateral=lateral,
         iterations=max(len(outer) - 1, 1), converged=True, mass_balance_error=float(error),
         active=active, flux_response=None, transmissivity=transmissivity, dry=dry,
+        barrier_flow=barrier_flows(barriers, heads, transmissivity, conv, params.cell),
     )  # fmt: skip
     return solution, newton
 
@@ -340,7 +362,7 @@ def _build_stage(params: p3.Params, stage: str, workspace: Path, newton: bool = 
         boundaries.append(ring)
     return build(
         params, boundaries, p3._wells(params, sub, stage), p3._fixed_head(params), workspace,
-        newton,
+        newton, p3._barriers(params, stage),
     )  # fmt: skip
 
 
@@ -361,7 +383,8 @@ Eenheden: meter en dag. Rooster: {nrow} rijen x {ncol} kolommen, cel {cell:g} m;
 de noordrand van de app-kaart (zoals gebruikelijk in MODFLOW 6). {origin}
 Neerslag {recharge:g} m/d.
 Watergangen (RIV), drains (DRN), GHB-groepen en putten (WEL) staan elk in een eigen pakket,
-genoemd naar de groep in de app. De conductances zijn door de app berekend (Ernst met
+genoemd naar de groep in de app. Damwanden staan in het HFB-pakket (hydraulische
+karakteristiek 1/c_w; 0 = ondoorlatend). De conductances zijn door de app berekend (Ernst met
 kv/kh, celgrootte-correctie De Lange). Transmissiviteit: {conv}.
 """
 
