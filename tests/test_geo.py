@@ -91,49 +91,6 @@ def test_wms_request_in_rd_with_model_aspect() -> None:
     assert params["bbox"] == "136300.00,455400.00,138300.00,456400.00"  # x, y order in RD
 
 
-def test_tile_level_and_range() -> None:
-    bbox = (136300.0, 455400.0, 137300.0, 456400.0)
-    level = pdok.tile_level(bbox, min_level=pdok.BGT_MIN_LEVEL)
-    assert level == pdok.BGT_MIN_LEVEL  # 0.84 m/px: about 1190 px for 1 km
-    cols, rows = pdok.tile_range(bbox, level)
-    span = pdok.RD_RES0 / 2**level * pdok.TILE
-    x0, y0 = pdok.RD_TILE_ORIGIN
-    assert x0 + cols.start * span <= bbox[0] < x0 + (cols.start + 1) * span
-    assert y0 - rows.start * span >= bbox[3] > y0 - (rows.start + 1) * span
-    assert len(cols) * len(rows) <= pdok.MAX_TILES
-    assert pdok.tile_level((130000.0, 450000.0, 135000.0, 455000.0), min_level=12) is None
-
-
-def test_bgt_tiles_are_stitched_in_place(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every tile gets its own colour; a point in the bbox must show its tile's colour."""
-    import io
-
-    from PIL import Image
-
-    bbox = (136300.0, 455400.0, 137300.0, 456400.0)
-    level = pdok.BGT_MIN_LEVEL
-    cols, rows = pdok.tile_range(bbox, level)
-
-    def colour(c: int, r: int) -> tuple[int, int, int]:
-        return (40 * (c - cols.start), 40 * (r - rows.start), 200)
-
-    def fake_get(url, params, timeout, headers):  # noqa: ANN001, ANN202
-        c, r = (int(v) for v in url.removesuffix(".png").split("/")[-2:])
-        return FakeResponse(_png(colour(c, r)))
-
-    monkeypatch.setattr(pdok.requests, "get", fake_get)
-    image = Image.open(io.BytesIO(pdok.background_image("bgt", bbox))).convert("RGB")
-    assert image.size == pdok.image_size(bbox)
-    span = pdok.RD_RES0 / 2**level * pdok.TILE
-    for x, y in [(136450.0, 456300.0), (137100.0, 455500.0), (136800.0, 455900.0)]:
-        c = int((x - pdok.RD_TILE_ORIGIN[0]) // span)
-        r = int((pdok.RD_TILE_ORIGIN[1] - y) // span)
-        px = round((x - bbox[0]) / (bbox[2] - bbox[0]) * image.size[0])
-        py = round((bbox[3] - y) / (bbox[3] - bbox[1]) * image.size[1])
-        got = image.getpixel((px, py))
-        assert all(abs(g - e) <= 12 for g, e in zip(got, colour(c, r), strict=True))  # JPEG
-
-
 def test_wms_error_document_gives_message(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_get(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
         return FakeResponse(b"<ServiceExceptionReport>fout</ServiceExceptionReport>")
@@ -144,7 +101,7 @@ def test_wms_error_document_gives_message(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.mark.online
-@pytest.mark.parametrize("kind", ["top10nl", "luchtfoto", "bgt"])
+@pytest.mark.parametrize("kind", ["top10nl", "luchtfoto", "ahn"])
 def test_online_background(kind: str) -> None:
     data = pdok.background_image(kind, (136300.0, 455400.0, 137300.0, 456400.0))
     assert data[:2] == b"\xff\xd8" and 20_000 < len(data) < 600_000  # a real JPEG map

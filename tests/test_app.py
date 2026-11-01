@@ -492,6 +492,7 @@ def test_grid_product_top10nl_import(monkeypatch: pytest.MonkeyPatch) -> None:
     at.number_input(key="p3_cx").set_value(128000.0).run()
     at.number_input(key="p3_cy").set_value(446000.0).run()
     at.button(key="p3_clear").click().run()
+    at.toggle(key="p3_ws_on").set_value(False).run()  # outside WDODelta: TOP10NL only
     at.button(key="p3_top10_get").click().run()
     assert not at.exception, [e.value for e in at.exception]
     at.button(key="p3_top10_add").click().run()
@@ -588,3 +589,47 @@ def test_budget_figure_posts_and_sign() -> None:
     assert [t.name for t in fig.data] == ["referentie", "opzet"]
     assert list(fig.data[1].y) == ["rand", "Wetering", "neerslag"]  # no zero post, no sum
     assert list(fig.data[1].x) == [-677.7, -44.3, 722.0]
+
+
+def test_grid_product_levels_and_legger_from_water_board(monkeypatch: pytest.MonkeyPatch) -> None:
+    """WDODelta (saved Kampereiland reply): watercourses per level area with the chosen
+    level, legger bottoms, borders on the drawing map; the model computes."""
+    import json
+
+    from gwproducten.geo import water, waterschap
+
+    raw = json.loads((Path(__file__).parent / "data" / "wdod_kampereiland.json").read_text())
+    monkeypatch.setattr(water, "fetch_waterdelen", lambda bbox: [])
+    monkeypatch.setattr(
+        waterschap, "level_areas", lambda bbox, board: waterschap.parse_level_areas(raw["levels"])
+    )
+    monkeypatch.setattr(
+        waterschap, "reaches",
+        lambda bbox, board: waterschap.parse_reaches(raw["lines"], raw["attributes"]),
+    )  # fmt: skip
+    page = str(APP / "pages" / "1_Grondwatertoolbox.py")
+    at = AppTest.from_file(page, default_timeout=120).run()
+    at.toggle(key="p3_geo").set_value(True).run()
+    at.number_input(key="p3_cx").set_value(186000.0).run()
+    at.number_input(key="p3_cy").set_value(512000.0).run()
+    at.number_input(key="p3_mv").set_value(0.0).run()
+    at.button(key="p3_clear").click().run()
+    at.selectbox(key="p3_ws_level").set_value("zomer").run()
+    at.button(key="p3_top10_get").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    preview = at.dataframe[-1].value
+    assert set(preview["Bodem uit"]) <= {"legger", "legger, aangepast", "aanname"}
+    assert preview["Bodem uit"].str.startswith("legger").sum() >= len(preview) - 2
+    at.button(key="p3_top10_add").click().run()
+    wcs = at.session_state["p3_wcs"]
+    assert wcs and all("gebied" in wc["name"] for wc in wcs)
+    zomer = {"64": -0.1, "1029": -0.4, "126": -0.65, "125": -1.0, "159": -0.4, "128": -0.85,
+             "63": -0.4, "127": -0.1}  # fmt: skip
+    for wc in wcs:
+        code = wc["name"].split("gebied ")[1].split(" ")[0]
+        assert wc["stage_ref"] == zomer[code] == wc["stage_new"]
+    names = [t.name for t in at.session_state["p3_fig_draw"].data]
+    assert "peilgebiedgrens" in names
+    at.button(key="p3_calc").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert not at.error, [e.value for e in at.error]

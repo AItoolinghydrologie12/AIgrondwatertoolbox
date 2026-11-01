@@ -267,14 +267,33 @@ product van en niet goedgekeurd door de USGS.
 - **Locatie en kaartgegevens** (optioneel, stap 1 → *Locatie*): adres zoeken (PDOK
   Locatieserver) of RD-middelpunt invullen. Daarmee:
   - **achtergrondkaart** onder teken- en resultaatkaart: topografie (BRT TOP10NL), luchtfoto
-    (Beeldmateriaal Nederland), BGT of AHN-hoogtekaart. BGT alleen tot ca. 1,2 × 1,2 km en
-    trager (4–6 s, tegels van PDOK); de andere kaarten < 1 s.
-  - **watergangen uit TOP10NL** (stap 2): hartlijnen 0,5–3 m en 3–6 m, vlakken > 6 m; duikers
-    vallen weg; breedte = midden van de breedteklasse; een vlak wordt lengte per cel =
-    oppervlak in de cel / breedte. **Peil en bodem staan niet in TOP10NL**: de app vult
-    standaardwaarden in (maaiveld − 1,2 / − 1,6 m) met een melding om ze in te vullen. Kleine
-    greppels ontbreken in TOP10NL. Geïmporteerde lijnen liggen in modelmeters: verschuif je
-    daarna de locatie, haal ze dan opnieuw op.
+    (Beeldmateriaal Nederland) of AHN-hoogtekaart, elk binnen ca. 1 s.
+  - **watergangen ophalen** (stap 2): TOP10NL (hartlijnen 0,5–3 m en 3–6 m, vlakken > 6 m;
+    duikers vallen weg; breedte = midden van de breedteklasse; een vlak wordt lengte per cel =
+    oppervlak in de cel / breedte). Kleine greppels ontbreken in TOP10NL.
+    **Binnen WDODelta** (Waterschap Drents Overijsselse Delta) komen daar bij:
+    - **peil uit de peilgebiedenkaart**: kies zomer-, winter-, min- of maxpeil; elk stuk
+      watergang (verdicht tot 10 m) krijgt het peil van het peilgebied waarin het ligt, een
+      lijn wordt dus gesplitst waar het peil verspringt. Ontbreekt het gekozen peil, dan
+      winter- (bij min) of zomerpeil (bij max). Peil na opzet = dit peil.
+    - **primaire en secundaire watergangen uit de legger**: lijnen uit de open lagen
+      *Primaire/Secundaire watergang* (2018), breedte en bodem waar mogelijk uit de
+      vastgestelde legger (13-12-2022, op watergangcode). **Bodem = gemiddelde van de
+      bodemhoogte boven- en benedenstrooms.** TOP10NL-stukken binnen 10 m van een
+      leggerlijn vallen weg (geen dubbeltelling).
+    - waar de legger geen bodem geeft: **bodem = peil − waterdiepte** (aanname, aanpasbaar:
+      legger primair 1,0 m, secundair 0,6 m, TOP10NL 0,4 / 0,8 / 1,5 m). In een proef
+      (2 × 2 km) had de legger een bodemhoogte bij ~95 % van de watergangen op het platteland
+      en bij ~25 % in Zwolle.
+    - ligt de legger-bodem op of boven het gekozen peil (sloot staat droog, bijv. bij
+      winterpeil), dan zet de app die bodem op peil − 0,10 m en meldt dat ("legger,
+      aangepast"); pas zelf aan of kies type drain.
+    - één watergang per (bron, peilgebied, breedte, bodem); bij veel profielen wordt grover
+      afgerond (max. 40). Peilgebiedgrenzen staan als stippellijn op de tekenkaart.
+    Buiten WDODelta (of met de schakelaar uit) is het peil een standaardwaarde (maaiveld −
+    1,2 m) met de melding "(peil invullen)". Andere waterschappen kunnen later worden
+    toegevoegd (`gwproducten/geo/waterschap.py`, tabel `WATERSCHAPPEN`). Geïmporteerde
+    lijnen liggen in modelmeters: verschuif je daarna de locatie, haal ze dan opnieuw op.
   - **maaiveld uit AHN** (0,5 m): mediaan per cel (5 × 5 waarden), dan de mediaan voor het
     model en per zone, met P10/P90. De app rekent met één maaiveld per zone.
   - **ondergrond uit REGIS II** (TNO, 100 m-rooster, midden van het model): voorstel voor de
@@ -288,7 +307,8 @@ product van en niet goedgekeurd door de USGS.
     de noordrand, zodat het model in GIS op zijn plek ligt.
   - Bronnen en licenties staan onder elke kaart/tabel: PDOK (Fair Use, gratis, geen key),
     Kadaster BRT TOP10NL en Beeldmateriaal Nederland (CC BY 4.0), AHN (CC0), REGIS II
-    (TNO-GDN, BRO). Elk verzoek betreft één modelgebied, met een timeout en de app-naam als
+    (TNO-GDN, BRO), peilgebieden en legger van WDODelta (open data / openbare legger).
+    Elk verzoek betreft één modelgebied, met een timeout en de app-naam als
     User-Agent; adressen worden niet bewaard (alleen de RD-coördinaat in je eigen project).
 - **Waterbalans** (stap 3 → *Waterbalans en conductances*): staafdiagram per post, referentie
   naast opzet; positief = water het grondwater in.

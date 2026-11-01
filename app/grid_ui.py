@@ -16,6 +16,7 @@ DRAIN_COLOR = "#7fbf7b"
 GHB_COLOR = "#17becf"
 WELL_COLOR = "#111111"
 THRESHOLD_COLOR = "#d62828"
+MAX_LEGEND = 8  # watercourses in the legend; more would push the map away
 ZONE_COLORS = ("#c9a227", "#6a994e", "#bc4749", "#577590", "#9d4edd")
 
 
@@ -80,10 +81,12 @@ def drawing_figure(
     wells: list[dict[str, Any]] | None = None,
     ghbs: list[dict[str, Any]] | None = None,
     zones: list[dict[str, Any]] | None = None,
+    outlines: list[list[tuple[float, float]]] | None = None,
 ) -> go.Figure:
-    """Grid with zones (subsoil), watercourses (shade = length in the cell), drawn lines and
-    pipe-drained cells. The last trace is the selection target: cell centres (box/lasso), or
-    a snap grid of spacing ``snap`` for clicking line vertices."""
+    """Grid with zones (subsoil), level-area borders (``outlines``), watercourses (shade =
+    length in the cell), drawn lines and pipe-drained cells. The last trace is the selection
+    target: cell centres (box/lasso), or a snap grid of spacing ``snap`` for clicking line
+    vertices."""
     x = (np.arange(ncol) + 0.5) * cell
     y = (np.arange(nrow) + 0.5) * cell
     fig = go.Figure()
@@ -127,10 +130,11 @@ def drawing_figure(
                     line={"color": "black", "width": 2}, hoverinfo="skip", showlegend=False,
                 )
             )  # fmt: skip
-        fig.add_trace(  # legend entry
+        fig.add_trace(  # legend entry; with many watercourses only the hover names them
             go.Scatter(
                 x=[None], y=[None], mode="markers", name=wc["name"],
                 marker={"symbol": "square", "size": 12, "color": colour},
+                showlegend=len(watercourses) <= MAX_LEGEND,
             )
         )  # fmt: skip
     for g in ghbs or []:
@@ -161,6 +165,18 @@ def drawing_figure(
             go.Scatter(
                 x=[None], y=[None], mode="markers", name="buisdrainage",
                 marker={"symbol": "square", "size": 12, "color": DRAIN_COLOR},
+            )
+        )  # fmt: skip
+    if outlines:
+        xs: list[float | None] = []
+        ys: list[float | None] = []
+        for ring in outlines:
+            xs += [p[0] for p in ring] + [None]
+            ys += [p[1] for p in ring] + [None]
+        fig.add_trace(
+            go.Scatter(
+                x=xs, y=ys, mode="lines", name="peilgebiedgrens", hoverinfo="skip",
+                line={"color": "#52514e", "width": 1.5, "dash": "dash"},
             )
         )  # fmt: skip
     fig.add_trace(_grid_lines(nrow, ncol, cell))
@@ -242,6 +258,7 @@ def result_figure(
                 x=xs, y=ys, mode="markers", name=wc["name"],
                 marker={"symbol": "square-open", "size": 7, "color": PALETTE[k % len(PALETTE)],
                         "line": {"width": 2}},
+                showlegend=len(watercourses) <= MAX_LEGEND,
             )
         )  # fmt: skip
     _add_wells(fig, wells or [], cell)

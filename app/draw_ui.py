@@ -15,7 +15,7 @@ from grid_ui import add_background, centre_key, drawing_figure
 from location_ui import background, background_caption, background_inputs, model_bbox
 from streamlit.errors import StreamlitAPIException
 from toolbox_state import DEFAULT_RADIUS, KEY, MAP_CONFIG, Grid, bump, example, reset, ss
-from water_import_ui import import_inputs, import_notice
+from water_import_ui import area_outlines, import_inputs, import_notice
 
 from gwproducten.products import peilopzet_grid as p3
 
@@ -323,6 +323,7 @@ def draw_panel(
             nrow, ncol, cell, grid.watercourses(), grid.drain_cells(),
             current_line=ss[f"{KEY}_line"], snap=snap, wells=grid.groups("wells"),
             ghbs=grid.groups("ghb"), zones=grid.zones(zone_values),
+            outlines=area_outlines(grid, values),
         )  # fmt: skip
         width, height = ncol * cell, nrow * cell
         bbox = model_bbox(values["origin_x"], values["origin_y"], width, height)

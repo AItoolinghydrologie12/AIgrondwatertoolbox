@@ -79,20 +79,9 @@ WMS = {
     "top10nl": ("https://service.pdok.nl/brt/top10nl/wms/v1_0", "top10nl"),
     "ahn": ("https://service.pdok.nl/rws/ahn/wms/v1_0", "dtm_05m"),
 }
-BGT_TILES = (
-    "https://service.pdok.nl/kadaster/bgt/wmts/v1_0/achtergrondvisualisatie/EPSG:28992/"
-    "{z:02d}/{col}/{row}.png"
-)
-# WMTS tile matrix set EPSG:28992 (Dutch standard): top-left corner and level-0 resolution
-RD_TILE_ORIGIN = (-285401.92, 903401.92)
-RD_RES0 = 3440.64  # m/px at level 0; halves per level
-TILE = 256
-MAX_TILES = 36  # tiles per BGT image (one model area, PDOK Fair Use)
-BGT_MIN_LEVEL = 12  # the BGT tiles only contain the map from level 12 (0.84 m/px)
 BACKGROUND_SOURCE = {
     "luchtfoto": "Luchtfoto: Beeldmateriaal Nederland (CC BY 4.0) via PDOK",
     "top10nl": "Topografie: Kadaster BRT TOP10NL (CC BY 4.0) via PDOK",
-    "bgt": "BGT: Basisregistratie Grootschalige Topografie via PDOK",
     "ahn": "Hoogtekaart: AHN (CC0) via PDOK",
 }
 
@@ -115,30 +104,6 @@ def wms_params(layer: str, bbox: Bbox, size: tuple[int, int], fmt: str) -> dict[
     }  # fmt: skip
 
 
-def tile_range(bbox: Bbox, level: int) -> tuple[range, range]:
-    """Columns and rows of the WMTS tiles covering ``bbox`` at ``level``."""
-    span = RD_RES0 / 2**level * TILE  # tile size [m]
-    x0, y0 = RD_TILE_ORIGIN
-    cols = range(int((bbox[0] - x0) // span), int((bbox[2] - x0) // span) + 1)
-    rows = range(int((y0 - bbox[3]) // span), int((y0 - bbox[1]) // span) + 1)
-    return cols, rows
-
-
-def tile_level(bbox: Bbox, max_px: int = MAX_PX, min_level: int = 0) -> int | None:
-    """Finest level (at least ``min_level``) whose image of the bbox stays near ``max_px``
-    and within MAX_TILES tiles; None if even ``min_level`` needs more tiles."""
-    target = max(bbox[2] - bbox[0], bbox[3] - bbox[1]) / max_px  # m/px
-    level = min_level
-    while level < 16 and RD_RES0 / 2 ** (level + 1) >= target:
-        level += 1
-    while level >= min_level:
-        cols, rows = tile_range(bbox, level)
-        if len(cols) * len(rows) <= MAX_TILES:
-            return level
-        level -= 1
-    return None
-
-
 def _to_jpeg(image: Any) -> bytes:
     import io
 
@@ -147,45 +112,8 @@ def _to_jpeg(image: Any) -> bytes:
     return buffer.getvalue()
 
 
-def _bgt_image(bbox: Bbox) -> bytes:
-    """Stitch BGT tiles and crop them to the bbox."""
-    import io
-    from concurrent.futures import ThreadPoolExecutor
-
-    from PIL import Image
-
-    level = tile_level(bbox, min_level=BGT_MIN_LEVEL)
-    if level is None:
-        raise ServiceError(
-            "De BGT-kaart is te gedetailleerd voor dit modelgebied (alleen tot ongeveer "
-            "1,2 × 1,2 km). Kies de topografische kaart (TOP10NL) of de luchtfoto."
-        )
-    cols, rows = tile_range(bbox, level)
-    res = RD_RES0 / 2**level
-
-    def fetch(cr: tuple[int, int]) -> tuple[tuple[int, int], bytes]:
-        url = BGT_TILES.format(z=level, col=cr[0], row=cr[1])
-        return cr, get(url, {}, "De BGT-kaart van PDOK").content
-
-    with ThreadPoolExecutor(max_workers=8) as pool:  # like a browser map viewer
-        tiles = dict(pool.map(fetch, [(c, r) for c in cols for r in rows]))
-    canvas = Image.new("RGB", (len(cols) * TILE, len(rows) * TILE), "white")
-    for (c, r), data in tiles.items():
-        tile = Image.open(io.BytesIO(data)).convert("RGBA")
-        canvas.paste(tile, ((c - cols.start) * TILE, (r - rows.start) * TILE), tile)
-    x0 = RD_TILE_ORIGIN[0] + cols.start * TILE * res
-    y0 = RD_TILE_ORIGIN[1] - rows.start * TILE * res
-    box = (
-        round((bbox[0] - x0) / res), round((y0 - bbox[3]) / res),
-        round((bbox[2] - x0) / res), round((y0 - bbox[1]) / res),
-    )  # fmt: skip
-    return _to_jpeg(canvas.crop(box).resize(image_size(bbox)))
-
-
 def background_image(kind: str, bbox: Bbox) -> bytes:
-    """JPEG of the map ``kind`` (luchtfoto, top10nl, bgt) exactly covering ``bbox``."""
-    if kind == "bgt":
-        return _bgt_image(bbox)
+    """JPEG of the map ``kind`` (top10nl, luchtfoto, ahn) exactly covering ``bbox``."""
     import io
 
     from PIL import Image
