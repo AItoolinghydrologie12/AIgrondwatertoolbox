@@ -89,13 +89,10 @@ def drawing_figure(
     fig = go.Figure()
     for k, zone in enumerate(zones or []):
         colour = ZONE_COLORS[k % len(ZONE_COLORS)]
-        z = np.full((nrow, ncol), np.nan)
-        for r, c in zone["cells"]:
-            z[r, c] = 1.0
         fig.add_trace(
-            go.Heatmap(
-                x=x, y=y, z=z, colorscale=[[0, colour], [1, colour]], showscale=False,
-                opacity=0.35, name=zone["name"],
+            _cell_heatmap(
+                dict.fromkeys(zone["cells"], 1.0), cell, colorscale=[[0, colour], [1, colour]],
+                showscale=False, opacity=0.35, name=zone["name"],
                 hovertemplate=f"zone {zone['name']}<extra></extra>",
             )
         )  # fmt: skip
@@ -105,23 +102,19 @@ def drawing_figure(
                 marker={"symbol": "square", "size": 12, "color": colour, "opacity": 0.5},
             )
         )  # fmt: skip
-    drained = np.full((nrow, ncol), np.nan)
-    for r, c in drain_cells:
-        drained[r, c] = 1.0
-    fig.add_trace(
-        go.Heatmap(
-            x=x, y=y, z=drained, colorscale=[[0, DRAIN_COLOR], [1, DRAIN_COLOR]],
-            showscale=False, hoverinfo="skip", name="buisdrainage",
-        )
-    )  # fmt: skip
+    if drain_cells:
+        fig.add_trace(
+            _cell_heatmap(
+                dict.fromkeys(drain_cells, 1.0), cell,
+                colorscale=[[0, DRAIN_COLOR], [1, DRAIN_COLOR]], showscale=False,
+                hoverinfo="skip", name="buisdrainage",
+            )
+        )  # fmt: skip
     for k, wc in enumerate(watercourses):
-        z = np.full((nrow, ncol), np.nan)
-        for (r, c), length in zip(wc["cells"], wc["lengths"], strict=True):
-            z[r, c] = length
         colour = PALETTE[k % len(PALETTE)]
         fig.add_trace(
-            go.Heatmap(
-                x=x, y=y, z=z, zmin=0.0, zmax=cell,
+            _cell_heatmap(
+                dict(zip(wc["cells"], wc["lengths"], strict=True)), cell, zmin=0.0, zmax=cell,
                 colorscale=[[0, "rgba(255,255,255,0.6)"], [1, colour]], showscale=False,
                 hovertemplate=wc["name"] + "<br>lengte in cel %{z:.1f} m<extra></extra>",
                 name=wc["name"],
@@ -141,13 +134,10 @@ def drawing_figure(
             )
         )  # fmt: skip
     for g in ghbs or []:
-        z = np.full((nrow, ncol), np.nan)
-        for r, c in g["cells"]:
-            z[r, c] = 1.0
         fig.add_trace(
-            go.Heatmap(
-                x=x, y=y, z=z, colorscale=[[0, GHB_COLOR], [1, GHB_COLOR]], showscale=False,
-                opacity=0.7, name=g["name"],
+            _cell_heatmap(
+                dict.fromkeys(g["cells"], 1.0), cell, colorscale=[[0, GHB_COLOR], [1, GHB_COLOR]],
+                showscale=False, opacity=0.7, name=g["name"],
                 hovertemplate=g["name"] + " (GHB)<extra></extra>",
             )
         )  # fmt: skip
@@ -177,7 +167,7 @@ def drawing_figure(
     if snap is None:
         gx, gy = np.meshgrid(x, y)
         target = go.Scattergl(
-            x=gx.ravel(), y=gy.ravel(), mode="markers", name="cellen",
+            x=_f4(gx), y=_f4(gy), mode="markers", name="cellen",
             marker={"size": 4, "color": "rgba(80,80,80,0.35)"}, showlegend=False,
             hovertemplate="x = %{x:.0f} m<br>y = %{y:.0f} m<extra></extra>",
         )  # fmt: skip
@@ -186,7 +176,7 @@ def drawing_figure(
         sy = np.arange(0.0, nrow * cell + 0.5 * snap, snap)
         gx, gy = np.meshgrid(sx, sy)
         target = go.Scattergl(
-            x=gx.ravel(), y=gy.ravel(), mode="markers", name="klikpunten",
+            x=_f4(gx), y=_f4(gy), mode="markers", name="klikpunten",
             marker={"size": 3, "color": "rgba(60,60,60,0.25)"}, showlegend=False,
             hovertemplate="klik: x = %{x:.1f} m, y = %{y:.1f} m<extra></extra>",
         )  # fmt: skip
@@ -227,9 +217,10 @@ def result_figure(
         scale = {"colorscale": "RdBu", "zmin": -vmax, "zmax": vmax}
     else:
         scale = {"colorscale": "Viridis_r" if reverse else "Viridis"}
+    z32 = np.asarray(z, dtype=np.float32)  # half the bytes; mm precision is kept
     fig = go.Figure(
         go.Contour(
-            x=x, y=y, z=z, ncontours=20, contours={"showlabels": True}, colorbar={"title": label},
+            x=x, y=y, z=z32, ncontours=20, contours={"showlabels": True}, colorbar={"title": label},
             hovertemplate="x = %{x:.0f} m<br>y = %{y:.0f} m<br>%{z:.3f} m<extra></extra>",
             **scale,
         )
@@ -237,7 +228,7 @@ def result_figure(
     if threshold is not None and np.nanmax(z) > threshold:
         fig.add_trace(
             go.Contour(
-                x=x, y=y, z=z,
+                x=x, y=y, z=z32,
                 contours={"start": threshold, "end": threshold, "size": 1, "coloring": "none"},
                 line={"color": THRESHOLD_COLOR, "width": 4}, showscale=False, hoverinfo="skip",
                 name=f"{threshold * 100:.0f} cm-grens", showlegend=True,
@@ -278,7 +269,7 @@ def result_figure(
         gx, gy = np.meshgrid(sx, sy)
         fig.add_trace(
             go.Scattergl(
-                x=gx.ravel(), y=gy.ravel(), mode="markers", name="klikpunten",
+                x=_f4(gx), y=_f4(gy), mode="markers", name="klikpunten",
                 marker={"size": 3, "color": "rgba(255,255,255,0.25)"}, showlegend=False,
                 hovertemplate="klik: x = %{x:.0f} m, y = %{y:.0f} m<extra></extra>",
             )
@@ -288,6 +279,25 @@ def result_figure(
     fig.update_layout(uirevision=f"{width}x{height}x{cell}")
     fig.update_layout(legend={"orientation": "h", "y": -0.12})
     return fig
+
+
+def _f4(a: np.ndarray) -> np.ndarray:
+    """Flattened float32 copy: sent to the browser as half the bytes of float64."""
+    return np.ravel(a).astype(np.float32)
+
+
+def _cell_heatmap(values: dict[tuple[int, int], float], cell: float, **kwargs: Any) -> go.Heatmap:
+    """Heatmap of only the bounding box of the given cells (row, col) -> value, placed with
+    x0/dx and y0/dy; the rest of the grid is not sent to the browser."""
+    if not values:
+        return go.Heatmap(z=[[None]], x0=0.5 * cell, dx=cell, y0=0.5 * cell, dy=cell, **kwargs)
+    rows = [r for r, _ in values]
+    cols = [c for _, c in values]
+    r0, c0 = min(rows), min(cols)
+    z = np.full((max(rows) - r0 + 1, max(cols) - c0 + 1), np.nan, dtype=np.float32)
+    for (r, c), v in values.items():
+        z[r - r0, c - c0] = v
+    return go.Heatmap(z=z, x0=(c0 + 0.5) * cell, dx=cell, y0=(r0 + 0.5) * cell, dy=cell, **kwargs)
 
 
 def _grid_lines(nrow: int, ncol: int, cell: float) -> go.Scatter:
