@@ -1,0 +1,21 @@
+{
+  "response":{
+    "numFound":218636,
+    "start":0,
+    "maxScore":15.355886,
+    "numFoundExact":true,
+    "docs":[{
+      "type":"weg",
+      "weergavenaam":"Domplein, Utrecht",
+      "centroide_rd":"POINT(136797.557 455862.387)"
+    },{
+      "type":"postcode",
+      "weergavenaam":"Domplein, 3512JC Utrecht",
+      "centroide_rd":"POINT(136790.381 455900.231)"
+    },{
+      "type":"postcode",
+      "weergavenaam":"Domplein, 3512JD Utrecht",
+      "centroide_rd":"POINT(136740.57 455879.94)"
+    }]
+  }
+}

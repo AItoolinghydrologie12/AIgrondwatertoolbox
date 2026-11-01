@@ -149,6 +149,9 @@ class Params:
     size_x: float = param(1000.0, "m", "Breedte model (x)", 50.0, 5000.0)
     size_y: float = param(1000.0, "m", "Hoogte model (y)", 50.0, 5000.0)
     cell: float = param(25.0, "m", "Celgrootte", 10.0, 50.0)
+    # lower-left corner in RD (EPSG:28992); 0, 0 = no location (local metres)
+    origin_x: float = param(0.0, "m", "RD x linksonder", 0.0, 300000.0)
+    origin_y: float = param(0.0, "m", "RD y linksonder", 0.0, 650000.0)
     boundary: str = "vast"
     boundary_head: float = param(3.8, "m NAP", "Stijghoogte vaste rand", -50.0, 50.0)
     boundary_layers: tuple[float | None, ...] = ()  # per node with "per_laag"; None = closed

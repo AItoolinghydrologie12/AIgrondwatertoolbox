@@ -13,6 +13,7 @@ from typing import Any
 import streamlit as st
 from draw_ui import draw_step
 from engine_ui import ENGINE_LABEL, mf6_status, run
+from location_ui import location_inputs
 from project_io import apply_project, parse_project, to_json
 from result_ui import result_tabs
 from subsoil_ui import subsoil_step
@@ -93,6 +94,7 @@ step1, step2, step3 = st.tabs(STEPS, key=f"{KEY}_step")
 
 # ---- stap 1: ondergrond, maaiveld en drainage ------------------------------------------
 with step1:
+    location_inputs(values)
     stack, zone_values, schematic_of, schematic_box = subsoil_step(values)
 
 cell = float(values["cell"])

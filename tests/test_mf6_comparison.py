@@ -51,6 +51,10 @@ CASES = {
     "freatische put, natte dikte 10 -> 7,7 m": p3.Params(
         stack=THICK, wells=(p3.WellGroup("bem", ((20, 20),), "freatisch", 0.0, 200.0),)
     ),
+    "put in het zuidoosten, RD-locatie (rijvolgorde MF6)": p3.Params(
+        wells=(p3.WellGroup("bem", ((4, 33),), "pakket1", 0.0, 100.0),),
+        origin_x=155000.0, origin_y=463000.0,
+    ),
 }  # fmt: skip
 
 
@@ -112,3 +116,22 @@ def test_mf6_failure_falls_back_to_own_solver(monkeypatch: pytest.MonkeyPatch) -
     assert res.engine == "eigen"
     assert "niet geconvergeerd" in res.engine_note and "eigen solver" in res.engine_note
     np.testing.assert_allclose(res.heads_new, p3.compute(p3.Params()).heads_new)
+
+
+def test_model_zip_is_north_up_with_rd_origin() -> None:
+    """MF6 row 1 is the north edge; DIS carries the RD corner so the model lies right in GIS."""
+    import io
+    import zipfile
+
+    par = CASES["put in het zuidoosten, RD-locatie (rijvolgorde MF6)"]
+    with zipfile.ZipFile(io.BytesIO(mf6.model_zip(par))) as zf:
+        dis = zf.read("opzet/gwt.dis").decode().lower()
+        wel = next(n for n in zf.namelist() if n.startswith("opzet/b") and "bem" in n)
+        wel_text = zf.read(wel).decode()
+        readme = zf.read("LEESMIJ.txt").decode()
+    options = dict(line.split()[:2] for line in dis.splitlines() if "origin" in line)
+    assert float(options["xorigin"]) == 155000.0 and float(options["yorigin"]) == 463000.0
+    # app row 4 (south) of 40 rows -> MF6 row 36 (1-based), column 34
+    assert any(line.split()[1:3] == ["36", "34"] for line in wel_text.splitlines()
+               if line.strip() and line.split()[0].isdigit())  # fmt: skip
+    assert "noordrand" in readme and "155000" in readme
