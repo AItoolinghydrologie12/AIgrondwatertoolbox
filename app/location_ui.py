@@ -7,10 +7,15 @@ from __future__ import annotations
 import base64
 from typing import Any
 
+import numpy as np
+import pandas as pd
 import streamlit as st
+from grid_ui import to_cells
 from toolbox_state import KEY, ss
 
-from gwproducten.geo import pdok
+from gwproducten.core.params import meta
+from gwproducten.geo import ahn, pdok
+from gwproducten.products import peilopzet_grid as p3
 
 DEFAULT_CENTRE = (155000.0, 463000.0)  # Amersfoort, origin of the RD system
 
@@ -74,12 +79,85 @@ def location_inputs(values: dict[str, Any]) -> None:
             f"({x0 + values['size_x']:.0f}; {y0 + values['size_y']:.0f}) m. Adreszoeker: "
             "PDOK Locatieserver."
         )
+        st.divider()
+        ahn_inputs(values)
+
+
+@st.cache_data(ttl=7 * 24 * 3600, max_entries=10, show_spinner="Maaiveld ophalen bij PDOK (AHN)…")
+def _ahn(bbox: pdok.Bbox, nrow: int, ncol: int) -> np.ndarray:
+    return ahn.surface_per_cell(bbox, nrow, ncol)
+
+
+def _clip_surface(value: float) -> float:
+    m = meta(p3.Params, "surface")
+    return round(min(max(value, m["min"]), m["max"]), 2)
+
+
+def ahn_inputs(values: dict[str, Any]) -> None:
+    """Surface level from AHN: median per cell, then the median of the model and of every
+    zone; 'Overnemen' fills the surface inputs of step 1."""
+    cell = float(values["cell"])
+    nrow, ncol = round(values["size_y"] / cell), round(values["size_x"] / cell)
+    bbox = model_bbox(values["origin_x"], values["origin_y"], ncol * cell, nrow * cell)
+    st.markdown("**Maaiveld uit AHN**")
+    if st.button("Maaiveld ophalen", key=f"{KEY}_ahn_get", icon=":material/landscape:"):
+        try:
+            ss[f"{KEY}_ahn"] = (bbox, nrow, ncol, _ahn(bbox, nrow, ncol))
+        except pdok.ServiceError as err:
+            st.warning(str(err))
+    fetched = ss.get(f"{KEY}_ahn")
+    if not fetched or fetched[:3] != (bbox, nrow, ncol):
+        st.caption(
+            "Haalt het maaiveld (AHN, 0,5 m) op als mediaan per cel en vult de mediaan in "
+            "voor het model en voor elke zone. Sloten en losse gebouwen tellen zo nauwelijks mee."
+        )
+        return
+    surface = fetched[3]
+    rows, targets = [], []
+    whole = ahn.stats(surface)
+    if whole is None:
+        st.info("Geen AHN-gegevens in dit gebied (bijvoorbeeld open water).")
+        return
+    rows.append(("Model (basis)", whole))
+    targets.append((f"{KEY}_mv", whole.median))
+    for z in ss[f"{KEY}_zones"]:
+        cells = to_cells(z["points"], cell, nrow, ncol)
+        if not cells:
+            continue
+        zs = ahn.stats(np.array([surface[r, c] for r, c in cells]))
+        if zs is not None:
+            rows.append((f"Zone {z['name']}", zs))
+            targets.append((f"{KEY}_z{z['id']}_mv", zs.median))
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "Gebied": name, "Mediaan [m NAP]": round(s.median, 2),
+                    "P10 [m NAP]": round(s.p10, 2), "P90 [m NAP]": round(s.p90, 2),
+                    "Cellen met AHN [%]": round(100 * s.coverage),
+                }
+                for name, s in rows
+            ]
+        ),
+        hide_index=True,
+    )  # fmt: skip
+    if whole.p90 - whole.p10 > 1.0:
+        st.info(
+            "Het maaiveld varieert meer dan 1 m in het model. Overweeg zones met een eigen "
+            "maaiveld; de app rekent met één maaiveld per zone."
+        )
+    if st.button("Overnemen als maaiveld", key=f"{KEY}_ahn_use", type="primary"):
+        for key, value in targets:
+            ss[key] = _clip_surface(value)
+        st.toast("Maaiveld overgenomen uit AHN.")
+    st.caption(f"Bron: {ahn.SOURCE}.")
 
 
 BACKGROUNDS = {
     "geen": "geen",
     "top10nl": "topografie (TOP10NL)",
     "luchtfoto": "luchtfoto",
+    "ahn": "hoogtekaart (AHN)",
     "bgt": "BGT (tot ~1,2 km, trager)",
 }
 
