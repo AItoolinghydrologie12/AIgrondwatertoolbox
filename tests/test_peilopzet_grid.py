@@ -367,3 +367,34 @@ def test_aquifer_anisotropy_adds_vertical_resistance() -> None:
     res_iso = p3.compute(dataclasses.replace(BASE, stack=iso))
     res_aniso = p3.compute(dataclasses.replace(BASE, stack=aniso))
     assert not np.allclose(res_iso.rise, res_aniso.rise)
+
+
+def test_bottom_per_cell_equals_split_watercourses() -> None:
+    """One watercourse with a bottom per cell (offsets from its bottom) gives the same heads
+    and RIV flux as the same cells split into two watercourses with those bottoms."""
+    base = p3.default_watercourses(1000.0, 1000.0, 25.0)
+    wc = base[0]
+    n = len(wc.cells)
+    offsets = tuple(-0.5 if k < n // 2 else 0.2 for k in range(n))
+    one = dataclasses.replace(wc, bottom_offsets=offsets)
+    low = dataclasses.replace(wc, name="laag", cells=wc.cells[: n // 2], bottom=wc.bottom - 0.5)
+    high = dataclasses.replace(wc, name="hoog", cells=wc.cells[n // 2 :], bottom=wc.bottom + 0.2)
+    assert one.cell_bottoms()[0] == pytest.approx(wc.bottom - 0.5)
+    res_one = p3.compute(p3.Params(watercourses=(one, *base[1:])))
+    res_two = p3.compute(p3.Params(watercourses=(low, high, *base[1:])))
+    assert np.max(np.abs(res_one.heads_new - res_two.heads_new)) < 1e-9
+    flux = res_one.budget.loc[wc.name]
+    assert flux.to_numpy() == pytest.approx(
+        (res_two.budget.loc["laag"] + res_two.budget.loc["hoog"]).to_numpy()
+    )
+    plain = p3.compute(p3.Params(watercourses=base))
+    assert np.max(np.abs(plain.heads_new - res_one.heads_new)) > 1e-4  # offsets do matter
+
+
+def test_bottom_per_cell_validation() -> None:
+    wc = p3.default_watercourses(1000.0, 1000.0, 25.0)[0]
+    with pytest.raises(ParamError, match="aantal bodemhoogtes"):
+        p3.Params(watercourses=(dataclasses.replace(wc, bottom_offsets=(0.0,)),)).validate()
+    above = dataclasses.replace(wc, bottom_offsets=(1.5,) * len(wc.cells))  # 2.6 + 1.5 > 3.8
+    with pytest.raises(ParamError, match="boven het peil"):
+        p3.Params(watercourses=(above,)).validate()

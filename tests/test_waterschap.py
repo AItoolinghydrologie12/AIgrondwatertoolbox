@@ -116,15 +116,55 @@ def test_saved_kampereiland_combination() -> None:
     assert len(res.groups) <= iw.MAX_GROUPS
 
 
-def test_grouping_gets_coarser_with_many_profiles() -> None:
+def test_many_loose_ditches_are_merged_with_a_note() -> None:
+    """60 parallel, unconnected reaches: more than MAX_GROUPS, so one watercourse per source,
+    area and width, each line keeping its own bottom."""
     areas = [_square("A", 0.0, 1000.0, {"winter": -1.0})]
     reaches = [
-        _reach(f"R{k}", 1, [(0.0, 10.0 * k), (1000.0, 10.0 * k)], -1.0 - 0.1 * k, -1.0 - 0.1 * k)
+        _reach(f"R{k}", 1, [(0.0, 10.0 * k), (1000.0, 10.0 * k)], -1.2 - 0.01 * k, -1.2 - 0.01 * k)
         for k in range(60)
     ]
     res = iw.combine([], reaches, areas, (0.0, 0.0), (25.0, 40, 40))
-    assert len(res.groups) <= iw.MAX_GROUPS
-    assert any("afgerond" in n for n in res.notes)
+    assert len(res.groups) == 1 and any("samengevoegd" in n for n in res.notes)
+    g = res.groups[0]
+    assert sorted(g.line_bottoms) == pytest.approx(sorted(-1.2 - 0.01 * k for k in range(60)))
+    assert g.bottom == pytest.approx(-1.2 - 0.01 * 29.5, abs=0.006)
+
+
+def test_connected_pieces_form_one_watercourse_with_own_bottoms() -> None:
+    """A main ditch, a side ditch onto its middle and a loose ditch: two watercourses; the
+    connected one keeps both legger bottoms as offsets from its length-weighted mean."""
+    areas = [_square("A", 0.0, 1000.0, {"winter": -1.0})]
+    main = _reach("M", 2, [(0.0, 500.0), (1000.0, 500.0)], -1.6, -1.6)
+    side = _reach("S", 2, [(500.0, 500.0), (500.0, 750.0)], -1.4, -1.4)
+    loose = _reach("L", 2, [(0.0, 900.0), (400.0, 900.0)], -1.5, -1.5)
+    res = iw.combine([], [main, side, loose], areas, (0.0, 0.0), (25.0, 40, 40))
+    assert len(res.groups) == 2 and not res.notes
+    big = max(res.groups, key=lambda g: g.length)
+    assert big.length == pytest.approx(1250.0, abs=1)
+    assert big.bottom == pytest.approx((1000 * -1.6 + 250 * -1.4) / 1250, abs=0.006)
+    for line, offset in zip(big.lines, big.line_offsets, strict=True):
+        assert big.bottom + offset == pytest.approx(-1.4 if line[0][0] == 500.0 else -1.6)
+    assert big.bottom_from_legger and big.width == 1.0
+
+
+def test_connected_lines_end_to_end_and_tee() -> None:
+    lines = [[(0.0, 0.0), (10.0, 0.0)], [(10.0, 0.0), (20.0, 0.0)], [(5.0, 0.5), (5.0, 9.0)],
+             [(30.0, 0.0), (40.0, 0.0)]]  # fmt: skip
+    assert sorted(sorted(s) for s in iw.connected_lines(lines)) == [[0, 1, 2], [3]]
+
+
+def test_include_only_primary_but_legger_still_removes_top10nl() -> None:
+    areas = [_square("A", 0.0, 1000.0, {"winter": -1.0})]
+    prim = _reach("P", 1, [(0.0, 500.0), (1000.0, 500.0)], -1.8, -1.8)
+    sec = _reach("S", 2, [(0.0, 200.0), (1000.0, 200.0)], -1.5, -1.5)
+    along_sec = water.Water("0,5 - 3 meter", False, (((0.0, 203.0), (1000.0, 203.0)),))
+    res = iw.combine([along_sec], [prim, sec], areas, (0.0, 0.0), (25.0, 40, 40),
+                     include={"legger 1"})  # fmt: skip
+    assert [g.source for g in res.groups] == ["Legger primair"]
+    res = iw.combine([along_sec], [prim, sec], areas, (0.0, 0.0), (25.0, 40, 40),
+                     include={"legger 1", "0,5 - 3 meter"})  # fmt: skip
+    assert [g.source for g in res.groups] == ["Legger primair"]  # TOP10NL is the secondary
 
 
 @pytest.mark.online

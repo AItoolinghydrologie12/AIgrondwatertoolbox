@@ -1,7 +1,8 @@
 """Import watercourses (step 2): TOP10NL water plus, within WDODelta, the level areas
-(peilgebieden) and the legger. Fetch, preview per watercourse, then add. Levels come from the
-chosen level of each area; bottoms from the legger (mean of upstream and downstream) or
-level - water depth."""
+(peilgebieden) and the legger. Choose which kinds, fetch, preview per watercourse, then add.
+Levels come from the chosen level of each area; bottoms from the legger (mean of upstream
+and downstream, kept per line) or level - water depth. Connected pieces form one
+watercourse."""
 
 from __future__ import annotations
 
@@ -25,6 +26,7 @@ DEPTH_INPUTS = {  # import_water.DEPTHS key -> (widget key suffix, label)
     "3 - 6 meter": ("t2", "TOP10NL 3–6 m"),
     "breed": ("t3", "Breder / onbekend"),
 }
+DEFAULT_KINDS = ["legger 1"]  # Job: only primary by default, keeps the table readable
 
 
 @st.cache_data(ttl=24 * 3600, max_entries=20, show_spinner="Watergangen ophalen bij PDOK…")
@@ -47,23 +49,24 @@ def _combine(
     choice: str,
     depths: dict[str, float],
     default_stage: float,
+    include: tuple[str, ...],
 ) -> import_water.Result:
     return import_water.combine(
         top10, reaches, areas, origin, grid, choice=choice, depths=depths,
-        default_stage=default_stage,
+        default_stage=default_stage, include=include,
     )  # fmt: skip
 
 
 def group_name(g: import_water.Group, taken: set[str]) -> str:
-    """Unique name: source and level area; with width and bottom when that is not unique,
-    then a number. '(peil invullen)' stays at the end for watercourses without an area."""
+    """Unique name: source and level area; with the width when that is not unique, then a
+    number. '(peil invullen)' stays at the end for watercourses without an area."""
     base = g.source.replace(" meter", " m")
     area = f" · gebied {g.area} ({g.stage:.2f})" if g.area is not None else ""
     end = "" if g.area is not None else TODO
     for name in (
         f"{base}{area}{end}",
-        f"{base}{area} · b {g.width:g} m, bodem {g.bottom:.2f}{end}",
-        *(f"{base}{area} · b {g.width:g} m, bodem {g.bottom:.2f} #{k}{end}" for k in range(2, 999)),
+        f"{base}{area} · b {g.width:g} m{end}",
+        *(f"{base}{area} · b {g.width:g} m #{k}{end}" for k in range(2, 999)),
     ):
         if name not in taken:
             taken.add(name)
@@ -73,7 +76,7 @@ def group_name(g: import_water.Group, taken: set[str]) -> str:
 
 def watercourse(g: import_water.Group, cell: float, taken: set[str]) -> dict[str, Any]:
     """Watercourse dict of the drawing state: lines as drawn lines (length per cell follows
-    the line), area water as cells with their length."""
+    the line) with their bottom offset, area water as cells with their length."""
     wc: dict[str, Any] = {
         "name": group_name(g, taken), "kind": "riv", "stage_ref": round(g.stage, 3),
         "stage_new": round(g.stage, 3), "bottom": round(g.bottom, 3), "width": g.width,
@@ -81,6 +84,8 @@ def watercourse(g: import_water.Group, cell: float, taken: set[str]) -> dict[str
         "lines": [list(ln) for ln in g.lines], "points": set(), "manual": {},
         "manual_cell": cell,
     }  # fmt: skip
+    if any(g.line_offsets):
+        wc["line_offsets"] = g.line_offsets
     for (r, c), length in g.cells.items():
         key = centre_key(r, c, cell)
         wc["points"].add(key)
@@ -96,7 +101,9 @@ def _preview(groups: list[import_water.Group]) -> pd.DataFrame:
                 "Peil [m NAP]": round(g.stage, 2), "Bodem [m NAP]": round(g.bottom, 2),
                 "Bodem uit": (
                     "legger, aangepast" if g.bottom_adjusted
-                    else "legger" if g.bottom_from_legger else "aanname"
+                    else "legger" if g.bottom_from_legger
+                    else f"deels legger ({g.legger_share:.0%})" if g.legger_share > 0.0
+                    else "aanname"
                 ),
                 "Breedte [m]": g.width, "Lengte [m]": round(g.length),
             }
@@ -105,11 +112,20 @@ def _preview(groups: list[import_water.Group]) -> pd.DataFrame:
     )  # fmt: skip
 
 
-def _options() -> tuple[bool, str, dict[str, float]]:
+def _options() -> tuple[bool, str, dict[str, float], tuple[str, ...]]:
     use_board = st.toggle(
         f"Peilen en legger van het waterschap ({BOARD.name})", value=True, key=f"{KEY}_ws_on",
         help="Peil uit de peilgebiedenkaart; primaire en secundaire watergangen met breedte en "
         "bodem uit de legger. Alleen binnen WDODelta; daarbuiten vul je het peil zelf in.",
+    )  # fmt: skip
+    options = [k for k in import_water.KINDS if use_board or not k.startswith("legger")]
+    kinds = st.multiselect(
+        "Welke watergangen", options,
+        default=DEFAULT_KINDS if use_board else options, format_func=import_water.KINDS.get,
+        key=f"{KEY}_kinds_{int(use_board)}",
+        help="Minder soorten = een overzichtelijker tabel en kaart. TOP10NL is alles wat niet "
+        "in de legger staat; ook watergangen uit de legger die je niet kiest, halen TOP10NL "
+        "langs dezelfde lijn weg.",
     )  # fmt: skip
     c1, c2 = st.columns([1, 2])
     choice = c1.selectbox(
@@ -129,7 +145,7 @@ def _options() -> tuple[bool, str, dict[str, float]]:
                 key=f"{KEY}_wd_{suffix}",
             )  # fmt: skip
         st.caption("Bodem = peil − waterdiepte.")
-    return use_board, choice, depths
+    return use_board, choice, depths, tuple(kinds)
 
 
 def import_inputs(grid: Grid, values: dict[str, Any]) -> None:
@@ -143,9 +159,10 @@ def import_inputs(grid: Grid, values: dict[str, Any]) -> None:
             "Haalt de watergangen in het modelgebied op: primaire en secundaire uit de legger "
             "van het waterschap, de overige uit TOP10NL (hartlijnen 0,5–3 en 3–6 m, vlakken "
             "van bredere wateren; duikers vallen weg). Elk stuk krijgt het peil van zijn "
-            "peilgebied. Kleine greppels ontbreken in TOP10NL."
+            "peilgebied; stukken die aan elkaar vastzitten worden één watergang, met de bodem "
+            "uit de legger per stuk. Kleine greppels ontbreken in TOP10NL."
         )
-        use_board, choice, depths = _options()
+        use_board, choice, depths, kinds = _options()
         if st.button("Ophalen", key=f"{KEY}_top10_get", icon=":material/water:"):
             fetched: dict[str, Any] = {"bbox": bbox, "top10": [], "areas": [], "reaches": []}
             try:
@@ -173,13 +190,22 @@ def import_inputs(grid: Grid, values: dict[str, Any]) -> None:
             return
         result = _combine(
             fetched["top10"], reaches, areas, origin, (grid.cell, grid.nrow, grid.ncol),
-            choice, depths, values["surface"] - 1.2,
+            choice, depths, values["surface"] - 1.2, kinds,
         )  # fmt: skip
+        if not result.groups:
+            st.info(
+                "Geen watergangen van de gekozen soort in dit gebied"
+                + ("" if reaches else " (geen legger hier: kies TOP10NL)")
+                + "."
+            )
+            return
         legger = sum(g.bottom_from_legger for g in result.groups)
         st.dataframe(_preview(result.groups), hide_index=True)
         st.caption(
-            f"{len(result.groups)} watergangen; bodem uit de legger bij {legger}, aangenomen "
-            "(peil − waterdiepte) bij de rest."
+            f"{len(result.groups)} watergangen; bodem geheel uit de legger bij {legger}, "
+            "aangenomen (peil − waterdiepte) waar de legger geen bodem geeft. Een watergang "
+            "met bodems uit de legger houdt die per stuk; in de tabel staat het gemiddelde, en "
+            "pas je dat aan, dan schuift de hele watergang mee."
         )
         for note in result.notes:
             st.info(note)

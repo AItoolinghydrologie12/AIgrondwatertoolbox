@@ -10,7 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from engine_ui import engine_badge, model_zip
-from grid_ui import add_background, result_figure
+from grid_ui import WC_STYLES, add_background, result_figure
 from location_ui import background, background_caption, model_bbox
 from profile_ui import crossings, profile_figure, profile_table, wall_crossings
 from toolbox_state import KEY, MAP_CONFIG, ss
@@ -146,12 +146,17 @@ def show_result(
 ) -> tuple[go.Figure, go.Figure | None, pd.DataFrame | None]:
     labels = res.node_labels
     keys = list(labels)
-    c5, c6 = st.columns(2)
+    c5, c6, c7 = st.columns([3, 2, 2])
     views = [v for v in VIEWS if v != "putten" or res.well_drawdown is not None]
     if ss.get(f"{KEY}_view") not in views:
         ss[f"{KEY}_view"] = views[0]
     view = c5.selectbox("Kaart", views, format_func=VIEWS.get, key=f"{KEY}_view")
     layer = c6.selectbox("Laag", keys, format_func=labels.get, key=f"{KEY}_layer")
+    wc_style = c7.selectbox(
+        "Watergangen", list(WC_STYLES), format_func=WC_STYLES.get, key=f"{KEY}_wcstyle",
+        help="Dunne lijnen houden de contouren leesbaar bij veel watergangen; 'cellen' toont "
+        "per watergang de cellen in kleur (ook GHB); 'uit' laat ze weg.",
+    )  # fmt: skip
     j = keys.index(layer)
     if view == "verhoging":
         z, label, thr, rev = res.rise[j], "verhoging [m]", params.threshold, False
@@ -172,7 +177,7 @@ def show_result(
         res.x, res.y, z, params.cell, outlined, label=label, threshold=thr, reverse=rev,
         profile=pts, click_snap=snap if clicking else None,
         wells=[{"name": g.name, "cells": g.cells} for g in params.wells],
-        walls=[{"name": w.name, "faces": w.faces} for w in params.walls],
+        walls=[{"name": w.name, "faces": w.faces} for w in params.walls], wc_style=wc_style,
     )  # fmt: skip
     bg = background(model_bbox(params.origin_x, params.origin_y, params.size_x, params.size_y))
     if bg is not None:

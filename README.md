@@ -279,6 +279,11 @@ product van en niet goedgekeurd door de USGS.
   gedeeltelijke cellen, diagonalen en bochten. Met
   rechthoek/lasso kies je volle cellen (plassen, buisdrainage). De lengte per cel is
   achteraf per cel aan te passen. Een watergang ligt rekenkundig altijd in het celmidden.
+  Met *aanwijzen en aanpassen* klik je een watergang op de kaart aan (of trek je een
+  rechthoek): die licht rood op en je past type, peilen, bodem, breedte en intreeweerstand
+  aan of verwijdert hem. De pagina start leeg; *Voorbeeld laden* geeft twee voorbeeldwatergangen.
+- **Resultaatkaart**: watergangen als dunne grijze lijnen (standaard; de contouren blijven
+  leesbaar), als gekleurde cellen, of uit.
 - **Locatie en kaartgegevens** (optioneel, stap 1 → *Locatie*): adres zoeken (PDOK
   Locatieserver) of RD-middelpunt invullen. Daarmee:
   - **achtergrondkaart** onder teken- en resultaatkaart: topografie (BRT TOP10NL), luchtfoto
@@ -303,8 +308,19 @@ product van en niet goedgekeurd door de USGS.
     - ligt de legger-bodem op of boven het gekozen peil (sloot staat droog, bijv. bij
       winterpeil), dan zet de app die bodem op peil − 0,10 m en meldt dat ("legger,
       aangepast"); pas zelf aan of kies type drain.
-    - één watergang per (bron, peilgebied, breedte, bodem); bij veel profielen wordt grover
-      afgerond (max. 40). Peilgebiedgrenzen staan als stippellijn op de tekenkaart.
+    - **kiezen wat je ophaalt** (*Welke watergangen*): legger primair, legger secundair,
+      TOP10NL 0,5–3 m, 3–6 m, breder/vlakken. Standaard alleen **legger primair** (een
+      overzichtelijke tabel); buiten WDODelta standaard alle TOP10NL-soorten. Ook een
+      leggerwatergang die je niet kiest, haalt TOP10NL langs dezelfde lijn weg.
+    - **stukken die aan elkaar vastzitten** (eind op eind, of een zijsloot op een
+      hoofdsloot, binnen 1 m) met dezelfde bron, hetzelfde peilgebied en dezelfde breedte
+      (afgerond op 0,25 m) vormen **één watergang**. De bodem uit de legger blijft **per
+      stuk** bewaard: de tabel toont het lengtegewogen gemiddelde, elk stuk houdt zijn
+      verschil daarmee (bodem per cel in de rekenkern, RIV-bodem per cel in MF6). Pas je de
+      bodem in de tabel aan, dan schuift de hele watergang mee. Meer dan 40 losse
+      watergangen: dan worden stukken van dezelfde soort, peilgebied en breedte samengevoegd
+      ook als ze niet aan elkaar vastzitten (met melding). Peilgebiedgrenzen staan als
+      stippellijn op de tekenkaart.
     Buiten WDODelta (of met de schakelaar uit) is het peil een standaardwaarde (maaiveld −
     1,2 m) met de melding "(peil invullen)". Andere waterschappen kunnen later worden
     toegevoegd (`gwproducten/geo/waterschap.py`, tabel `WATERSCHAPPEN`). Geïmporteerde

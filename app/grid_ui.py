@@ -18,6 +18,8 @@ WELL_COLOR = "#111111"
 WALL_COLOR = "#000000"
 THRESHOLD_COLOR = "#d62828"
 MAX_LEGEND = 8  # watercourses in the legend; more would push the map away
+WC_STYLES = {"lijnen": "dunne lijnen", "cellen": "cellen", "uit": "uit"}
+WC_LINE_COLOR = "rgba(20,20,20,0.55)"
 SNAP_POINTS = 100  # click points along the longest side when drawing a line
 ZONE_COLORS = ("#c9a227", "#6a994e", "#bc4749", "#577590", "#9d4edd")
 
@@ -49,17 +51,25 @@ def absolute_lines(
 
 def wc_geometry(
     wc: dict[str, Any], cell: float, nrow: int, ncol: int
-) -> tuple[tuple[tuple[int, int], ...], tuple[float, ...]]:
-    """Cells and length per cell of a drawn watercourse.
+) -> tuple[tuple[tuple[int, int], ...], tuple[float, ...], tuple[float, ...] | None]:
+    """Cells, length per cell and bottom offset per cell (None when all zero) of a drawn
+    watercourse.
 
     Drawn lines give the length of the line inside each cell; lasso/box cells get the
     watercourse's default length; manual lengths (per cell centre, only valid for the cell
-    size they were made with) override both, and 0 removes a cell.
+    size they were made with) override both, and 0 removes a cell. ``line_offsets`` (one
+    per drawn line, e.g. legger bottoms of an import) give the bottom of a line relative to
+    the watercourse bottom; a cell gets the length-weighted mean of the lines through it.
     """
     lengths: dict[tuple[int, int], float] = {}
-    for line in absolute_lines(wc, ncol * cell, nrow * cell):
+    weighted: dict[tuple[int, int], float] = {}
+    offsets = list(wc.get("line_offsets") or [])
+    for k, line in enumerate(absolute_lines(wc, ncol * cell, nrow * cell)):
+        offset = float(offsets[k]) if k < len(offsets) else 0.0
         for rc, length in polyline_cell_lengths(line, cell, nrow, ncol).items():
             lengths[rc] = lengths.get(rc, 0.0) + length
+            weighted[rc] = weighted.get(rc, 0.0) + offset * length
+    line_length = dict(lengths)
     for rc in to_cells(wc.get("points", set()), cell, nrow, ncol):
         lengths.setdefault(rc, float(wc["length"]))
     if wc.get("manual_cell") == cell:
@@ -68,7 +78,11 @@ def wc_geometry(
             if key in wc.get("manual", {}):
                 lengths[(r, c)] = wc["manual"][key]
     cells = tuple(sorted(rc for rc, length in lengths.items() if length > 1e-9))
-    return cells, tuple(lengths[rc] for rc in cells)
+    cell_offsets = tuple(
+        round(weighted[rc] / line_length[rc], 3) if line_length.get(rc, 0.0) > 1e-9 else 0.0
+        for rc in cells
+    )
+    return cells, tuple(lengths[rc] for rc in cells), (cell_offsets if any(cell_offsets) else None)
 
 
 def line_snap(cell: float, size_x: float, size_y: float) -> float:
@@ -91,11 +105,13 @@ def drawing_figure(
     zones: list[dict[str, Any]] | None = None,
     outlines: list[list[tuple[float, float]]] | None = None,
     walls: list[dict[str, Any]] | None = None,
+    highlight: str | None = None,
 ) -> go.Figure:
     """Grid with zones (subsoil), level-area borders (``outlines``), watercourses (shade =
-    length in the cell), drawn lines, pipe-drained cells and walls (on cell faces). The last
-    trace is the selection target: cell centres (box/lasso), or a snap grid of spacing
-    ``snap`` for clicking line vertices."""
+    length in the cell), drawn lines, pipe-drained cells and walls (on cell faces); the
+    watercourse named ``highlight`` is outlined in red. The last trace is the selection
+    target: cell centres (box/lasso), or a snap grid of spacing ``snap`` for clicking line
+    vertices."""
     x = (np.arange(ncol) + 0.5) * cell
     y = (np.arange(nrow) + 0.5) * cell
     fig = go.Figure()
@@ -158,6 +174,18 @@ def drawing_figure(
             go.Scatter(
                 x=[None], y=[None], mode="markers", name=f"{g['name']} (GHB)",
                 marker={"symbol": "square", "size": 12, "color": GHB_COLOR},
+            )
+        )  # fmt: skip
+    for wc in watercourses:
+        if wc["name"] != highlight:
+            continue
+        fig.add_trace(
+            go.Scatter(
+                x=[(c + 0.5) * cell for _, c in wc["cells"]],
+                y=[(r + 0.5) * cell for r, _ in wc["cells"]], mode="markers",
+                marker={"symbol": "square-open", "size": 9, "color": THRESHOLD_COLOR,
+                        "line": {"width": 2.5}},
+                name=f"aangewezen: {wc['name']}", hoverinfo="skip",
             )
         )  # fmt: skip
     _add_wells(fig, wells or [], cell)
@@ -235,10 +263,13 @@ def result_figure(
     wells: list[dict[str, Any]] | None = None,
     min_span: float = 0.0,
     walls: list[dict[str, Any]] | None = None,
+    wc_style: str = "cellen",
 ) -> go.Figure:
-    """Contour map of a result field with watercourse cells outlined, an optional profile
-    line, and (``click_snap``) a last trace of click points on a snap grid. ``min_span``:
-    smallest half-range of a diverging scale, so that tiny values stay near white."""
+    """Contour map of a result field with the watercourses (``wc_style``: "cellen" outlines
+    their cells in colour, "lijnen" draws thin grey lines, "uit" leaves them out), an optional
+    profile line, and (``click_snap``) a last trace of click points on a snap grid.
+    ``min_span``: smallest half-range of a diverging scale, so that tiny values stay near
+    white."""
     if diverging:
         vmax = max(float(np.nanmax(np.abs(z))), min_span) or 1.0
         scale = {"colorscale": "RdBu", "zmin": -vmax, "zmax": vmax}
@@ -261,17 +292,20 @@ def result_figure(
                 name=f"{threshold * 100:.0f} cm-grens", showlegend=True,
             )
         )  # fmt: skip
-    for k, wc in enumerate(watercourses):
-        xs = [(c + 0.5) * cell for _, c in wc["cells"]]
-        ys = [(r + 0.5) * cell for r, _ in wc["cells"]]
-        fig.add_trace(
-            go.Scatter(
-                x=xs, y=ys, mode="markers", name=wc["name"],
-                marker={"symbol": "square-open", "size": 7, "color": PALETTE[k % len(PALETTE)],
-                        "line": {"width": 2}},
-                showlegend=len(watercourses) <= MAX_LEGEND,
-            )
-        )  # fmt: skip
+    if wc_style == "cellen":
+        for k, wc in enumerate(watercourses):
+            xs = [(c + 0.5) * cell for _, c in wc["cells"]]
+            ys = [(r + 0.5) * cell for r, _ in wc["cells"]]
+            fig.add_trace(
+                go.Scatter(
+                    x=xs, y=ys, mode="markers", name=wc["name"],
+                    marker={"symbol": "square-open", "size": 7,
+                            "color": PALETTE[k % len(PALETTE)], "line": {"width": 2}},
+                    showlegend=len(watercourses) <= MAX_LEGEND,
+                )
+            )  # fmt: skip
+    elif wc_style == "lijnen":
+        _add_thin_watercourses(fig, watercourses, cell, len(y), len(x))
     _add_wells(fig, wells or [], cell)
     add_walls(fig, walls or [], cell)
     if profile:
@@ -413,6 +447,50 @@ def add_walls(fig: go.Figure, walls: list[dict[str, Any]], cell: float) -> None:
                 x=xs, y=ys, mode="lines", name=f"{w['name']} (damwand)",
                 line={"color": WALL_COLOR, "width": 5},
                 hovertemplate=w["name"] + "<extra>damwand</extra>",
+            )
+        )  # fmt: skip
+
+
+def _add_thin_watercourses(
+    fig: go.Figure, watercourses: list[dict[str, Any]], cell: float, nrow: int, ncol: int
+) -> None:
+    """Watercourses as thin grey lines (drawn or imported lines) or small open squares (cells
+    without a line, e.g. lasso cells, wide water, GHB); the name shows on hover. One legend
+    entry for all of them."""
+    for wc in watercourses:
+        lines = wc.get("lines") or []
+        if lines:
+            xs: list[float | None] = []
+            ys: list[float | None] = []
+            for line in lines:
+                xs += [p[0] for p in line] + [None]
+                ys += [p[1] for p in line] + [None]
+            fig.add_trace(
+                go.Scatter(
+                    x=xs, y=ys, mode="lines", name=wc["name"], showlegend=False,
+                    line={"color": WC_LINE_COLOR, "width": 1.5},
+                    hovertemplate=wc["name"] + "<extra></extra>",
+                )
+            )  # fmt: skip
+        on_line = set()
+        for line in lines:
+            on_line |= set(polyline_cell_lengths(line, cell, nrow, ncol))
+        rest = [rc for rc in wc["cells"] if rc not in on_line]
+        if rest:
+            fig.add_trace(
+                go.Scatter(
+                    x=[(c + 0.5) * cell for _, c in rest], y=[(r + 0.5) * cell for r, _ in rest],
+                    mode="markers", name=wc["name"], showlegend=False,
+                    marker={"symbol": "square-open", "size": 5, "color": WC_LINE_COLOR,
+                            "line": {"width": 1}},
+                    hovertemplate=wc["name"] + "<extra></extra>",
+                )
+            )  # fmt: skip
+    if watercourses:
+        fig.add_trace(
+            go.Scatter(
+                x=[None], y=[None], mode="lines", name="watergangen",
+                line={"color": WC_LINE_COLOR, "width": 1.5},
             )
         )  # fmt: skip
 

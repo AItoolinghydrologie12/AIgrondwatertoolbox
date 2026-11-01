@@ -114,7 +114,9 @@ C'_i = \frac{1}{c_\text{wg}/u_i + R_{\text{rad},i}} \quad [\text{m/d per m}],
 $$
 
 met $L$ de lengte van de watergang in de cel. De waterdiepte volgt uit referentiepeil −
-bodemhoogte.
+bodemhoogte. Een watergang kan een bodemhoogte per cel hebben (bijvoorbeeld de legger per
+traject bij een geïmporteerde watergang); dan worden natte omtrek, radiale weerstand en de
+RIV-bodem per cel met die bodem bepaald.
 
 **Radiale weerstand met anisotropie (Ernst).** Alleen in het pakket met de bodem stroomt het
 water met een trechter naar de watergang. Rek de verticale maten op met

@@ -17,7 +17,7 @@ from location_ui import location_inputs
 from project_io import apply_project, parse_project, to_json
 from result_ui import result_tabs
 from subsoil_ui import subsoil_step
-from toolbox_state import DEFAULTS, KEY, Grid, build_params, example, reset, ss
+from toolbox_state import DEFAULTS, KEY, Grid, build_params, reset, ss
 from ui_common import number, page_header, show_param_error
 
 from gwproducten.core.params import ParamError, meta
@@ -28,7 +28,7 @@ STEPS = ["1 · Ondergrond en maaiveld", "2 · Watergangen tekenen", "3 · Bereke
 page_header(p3.META)
 
 if f"{KEY}_wcs" not in ss:
-    reset(example())
+    reset([])  # start empty; "Voorbeeld laden" gives the two example watercourses
 ss.setdefault(f"{KEY}_zones", [])
 ss.setdefault(f"{KEY}_walls", [])
 _pending = ss.pop(f"{KEY}_pending_project", None)

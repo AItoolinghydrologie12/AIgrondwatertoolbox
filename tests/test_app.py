@@ -9,6 +9,14 @@ APP = Path(__file__).resolve().parent.parent / "app"
 PAGES = [APP / "Home.py", *sorted((APP / "pages").glob("*.py"))]
 
 
+def _toolbox(page: str, timeout: int) -> AppTest:
+    """The page with the example loaded (the Grondwatertoolbox starts empty)."""
+    at = AppTest.from_file(page, default_timeout=timeout).run()
+    if any(b.key == "p3_ex" for b in at.button):
+        at.button(key="p3_ex").click().run()
+    return at
+
+
 @pytest.mark.parametrize("page", PAGES, ids=lambda p: p.stem)
 def test_page_runs_without_errors(page: Path) -> None:
     at = AppTest.from_file(str(page), default_timeout=60).run()
@@ -18,7 +26,7 @@ def test_page_runs_without_errors(page: Path) -> None:
 
 def test_grid_product_page_example_and_views() -> None:
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
-    at = AppTest.from_file(page, default_timeout=120).run()
+    at = _toolbox(page, 120)
     assert not at.exception, [e.value for e in at.exception]
     assert not at.error, [e.value for e in at.error]
     at.button(key="p3_calc").click().run()
@@ -33,7 +41,7 @@ def test_grid_product_page_example_and_views() -> None:
 
 def test_grid_product_computes_only_after_button() -> None:
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
-    at = AppTest.from_file(page, default_timeout=120).run()
+    at = _toolbox(page, 120)
     assert "p3_result" not in at.session_state
     assert any("Nog niet gerekend" in i.value for i in at.info)
     at.button(key="p3_calc").click().run()
@@ -50,7 +58,7 @@ def test_grid_product_computes_only_after_button() -> None:
 
 def test_grid_product_line_drawing_gives_partial_cells() -> None:
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
-    at = AppTest.from_file(page, default_timeout=120).run()
+    at = _toolbox(page, 120)
     n_before = len(at.session_state["p3_wcs"])
     # a line from a cell centre to halfway a cell: last cell gets 12.5 m
     at.session_state["p3_line"] = [(112.5, 100.0), (112.5, 162.5)]
@@ -67,7 +75,7 @@ def test_grid_product_line_drawing_gives_partial_cells() -> None:
 
 def test_grid_product_profile_modes() -> None:
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
-    at = AppTest.from_file(page, default_timeout=120).run()
+    at = _toolbox(page, 120)
     at.button(key="p3_calc").click().run()
     assert not at.exception, [e.value for e in at.exception]
     assert len(at.metric) >= 6  # KPI cards
@@ -85,7 +93,7 @@ def test_grid_product_profile_modes() -> None:
 
 def test_grid_product_wells_ghb_seepage_and_layer_boundary() -> None:
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
-    at = AppTest.from_file(page, default_timeout=120).run()
+    at = _toolbox(page, 120)
     at.session_state["p3_wells"] = [
         {
             "name": "Bemaling",
@@ -138,7 +146,7 @@ def test_drawing_figure_is_fast_on_fine_grid() -> None:
         for k in range(3)
     ]  # fmt: skip
     for wc in wcs:
-        wc["cells"], wc["lengths"] = wc_geometry(wc, cell, n, n)
+        wc["cells"], wc["lengths"], _ = wc_geometry(wc, cell, n, n)
     t0 = time.perf_counter()
     drawing_figure(n, n, cell, wcs, ()).to_json()
     assert time.perf_counter() - t0 < 2.0
@@ -146,7 +154,7 @@ def test_drawing_figure_is_fast_on_fine_grid() -> None:
 
 def test_grid_product_page_fine_cells() -> None:
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
-    at = AppTest.from_file(page, default_timeout=120).run()
+    at = _toolbox(page, 120)
     at.number_input(key="p3_cell").set_value(10.0).run()
     at.button(key="p3_calc").click().run()
     assert not at.exception, [e.value for e in at.exception]
@@ -155,7 +163,7 @@ def test_grid_product_page_fine_cells() -> None:
 
 def test_grid_product_model_size_follows_cell_size() -> None:
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
-    at = AppTest.from_file(page, default_timeout=120).run()
+    at = _toolbox(page, 120)
     at.number_input(key="p3_cell").set_value(50.0).run()
     at.number_input(key="p3_sx").set_value(5000.0).run()
     at.number_input(key="p3_sy").set_value(5000.0).run()
@@ -169,7 +177,7 @@ def test_grid_product_model_size_follows_cell_size() -> None:
 
 def test_grid_product_four_aquifers() -> None:
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
-    at = AppTest.from_file(page, default_timeout=120).run()
+    at = _toolbox(page, 120)
     at.number_input(key="p3_naq_freatisch_zand").set_value(4).run()
     at.radio(key="p3_bnd").set_value("per_laag").run()
     at.toggle(key="p3_kwel").set_value(True).run()
@@ -183,7 +191,7 @@ def test_grid_product_four_aquifers() -> None:
 
 def test_grid_product_zones() -> None:
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
-    at = AppTest.from_file(page, default_timeout=120).run()
+    at = _toolbox(page, 120)
     at.button(key="p3_zone_add").click().run()
     zones = at.session_state["p3_zones"]
     assert [z["name"] for z in zones] == ["Zone 1"]
@@ -223,7 +231,7 @@ def test_default_example_scales_with_model(cell: float, size: float) -> None:
     core = p3.default_watercourses(size, size, cell)
     for (frac, spec), wc_core in zip(p3.DEFAULT_WATERCOURSE_SPECS, core, strict=True):
         drawn = {"rel_lines": [[(frac, 0.0), (frac, 1.0)]], "length": cell}
-        cells, lengths = wc_geometry(drawn, cell, n, n)
+        cells, lengths, _ = wc_geometry(drawn, cell, n, n)
         cols = {c for _, c in cells}
         assert cols == {int(frac * n)} == {c for _, c in wc_core.cells}
         assert len(cells) == n and sum(lengths) == pytest.approx(size)
@@ -237,6 +245,8 @@ def test_default_example_scales_with_model(cell: float, size: float) -> None:
 def test_grid_product_drawing_menu_all_combinations() -> None:
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
     at = AppTest.from_file(page, default_timeout=120).run()
+    assert at.session_state["p3_wcs"] == []  # the page starts empty
+    at.button(key="p3_ex").click().run()
     for how in ("lijn", "cellen", "wissen"):
         at.radio(key="p3_wc_how").set_value(how).run()
         assert not at.exception, [e.value for e in at.exception]
@@ -276,7 +286,7 @@ def test_grid_product_project_roundtrip() -> None:
     from project_io import export_project, parse_project
 
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
-    at = AppTest.from_file(page, default_timeout=120).run()
+    at = _toolbox(page, 120)
     at.number_input(key="p3_cell").set_value(20.0).run()
     at.number_input(key="p3_mv").set_value(4.5).run()
     at.number_input(key="p3_naq_freatisch_zand").set_value(3).run()
@@ -324,7 +334,7 @@ def test_invalid_project_file_gives_message() -> None:
 def test_grid_product_validation_benchmark_button() -> None:
     """The benchmark in the validation tab runs for the allowed cell sizes."""
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
-    at = AppTest.from_file(page, default_timeout=180).run()
+    at = _toolbox(page, 180)
     at.button(key="p3_calc").click().run()
     at.button(key="p3_bench").click().run()
     assert not at.exception, [e.value for e in at.exception]
@@ -339,7 +349,7 @@ def test_grid_product_with_modflow6_engine() -> None:
     if not mf6.available():
         pytest.skip("flopy/mf6 niet geïnstalleerd")
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
-    at = AppTest.from_file(page, default_timeout=180).run()
+    at = _toolbox(page, 180)
     at.button(key="p3_calc").click().run()
     own = at.session_state["p3_result"]["res"]
     at.radio(key="p3_engine").set_value("mf6").run()
@@ -361,7 +371,7 @@ def test_engine_comparison_page() -> None:
     from gwproducten.products.peilopzet_grid import mf6
 
     page = str(APP / "pages" / "2_Rekenkern_MODFLOW6.py")
-    at = AppTest.from_file(page, default_timeout=180).run()
+    at = _toolbox(page, 180)
     assert not at.exception, [e.value for e in at.exception]
     assert any("Bereken eerst" in i.value for i in at.info)
     if not mf6.available():
@@ -391,7 +401,7 @@ def test_engine_comparison_page() -> None:
 def test_grid_product_line_undo_and_cancel_in_drawing_panel() -> None:
     """The line buttons live in the drawing fragment; they also work in a full-page run."""
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
-    at = AppTest.from_file(page, default_timeout=120).run()
+    at = _toolbox(page, 120)
     at.session_state["p3_line"] = [(100.0, 100.0), (200.0, 100.0), (200.0, 300.0)]
     at.run()
     at.button(key="p3_undo").click().run()
@@ -438,7 +448,7 @@ def test_grid_product_location_sets_rd_origin() -> None:
     from project_io import export_project
 
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
-    at = AppTest.from_file(page, default_timeout=120).run()
+    at = _toolbox(page, 120)
     at.button(key="p3_calc").click().run()
     assert at.session_state["p3_result"]["params"].origin_x == 0.0
     at.toggle(key="p3_geo").set_value(True).run()
@@ -465,7 +475,7 @@ def test_grid_product_background_map(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(pdok, "background_image", fake_image)
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
-    at = AppTest.from_file(page, default_timeout=120).run()
+    at = _toolbox(page, 120)
     at.toggle(key="p3_geo").set_value(True).run()
     at.number_input(key="p3_cx").set_value(120500.0).run()
     at.selectbox(key="p3_bg").set_value("luchtfoto").run()
@@ -477,8 +487,9 @@ def test_grid_product_background_map(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_grid_product_top10nl_import(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Import with the service mocked by a saved response: one watercourse per width class,
-    lines in model metres, a reminder to fill in the levels; the model computes."""
+    """Import with the service mocked by a saved response: watercourses per width class
+    (connected pieces together), lines in model metres, a reminder to fill in the levels;
+    the model computes."""
     import json
 
     from gwproducten.geo import water
@@ -488,7 +499,7 @@ def test_grid_product_top10nl_import(monkeypatch: pytest.MonkeyPatch) -> None:
     items = water.parse_waterdelen(data, False) + water.parse_waterdelen(vlak, True)
     monkeypatch.setattr(water, "fetch_waterdelen", lambda bbox: items)
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
-    at = AppTest.from_file(page, default_timeout=120).run()
+    at = _toolbox(page, 120)
     at.toggle(key="p3_geo").set_value(True).run()
     at.number_input(key="p3_cx").set_value(128000.0).run()
     at.number_input(key="p3_cy").set_value(446000.0).run()
@@ -498,15 +509,16 @@ def test_grid_product_top10nl_import(monkeypatch: pytest.MonkeyPatch) -> None:
     assert not at.exception, [e.value for e in at.exception]
     at.button(key="p3_top10_add").click().run()
     wcs = at.session_state["p3_wcs"]
-    assert [wc["width"] for wc in wcs] == [1.75, 4.5, 9.0]
+    assert {wc["width"] for wc in wcs} == {1.75, 4.5, 9.0}
+    assert 3 <= len(wcs) <= 40 and len({wc["name"] for wc in wcs}) == len(wcs)
     assert all(wc["name"].endswith("(peil invullen)") for wc in wcs)
     x, y = wcs[0]["lines"][0][0]
     assert -1000.0 < x < 2000.0 and -1000.0 < y < 2000.0  # local metres, not RD
-    assert wcs[2]["points"] and not wcs[2]["lines"]  # the areas
+    assert any(wc["points"] and not wc["lines"] for wc in wcs)  # the areas
     assert any("peil invullen" in w.value for w in at.warning)
     at.button(key="p3_calc").click().run()
     assert not at.exception, [e.value for e in at.exception]
-    assert len(at.session_state["p3_result"]["params"].watercourses) == 3
+    assert len(at.session_state["p3_result"]["params"].watercourses) == len(wcs)
 
 
 def test_grid_product_surface_from_ahn(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -523,7 +535,7 @@ def test_grid_product_surface_from_ahn(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(ahn, "surface_per_cell", fake)
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
-    at = AppTest.from_file(page, default_timeout=120).run()
+    at = _toolbox(page, 120)
     at.button(key="p3_clear").click().run()  # the example ditches lie above this surface
     at.button(key="p3_zone_add").click().run()
     zones = at.session_state["p3_zones"]
@@ -550,7 +562,7 @@ def test_grid_product_subsoil_from_regis(monkeypatch: pytest.MonkeyPatch) -> Non
     text = (Path(__file__).parent / "data" / "regis_lopik.ascii").read_text(encoding="utf-8")
     monkeypatch.setattr(regis, "fetch_point", lambda x, y: regis.parse_ascii(text))
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
-    at = AppTest.from_file(page, default_timeout=120).run()
+    at = _toolbox(page, 120)
     at.toggle(key="p3_geo").set_value(True).run()
     at.number_input(key="p3_rg_nmax").set_value(2).run()
     at.button(key="p3_rg_get").click().run()
@@ -609,7 +621,7 @@ def test_grid_product_levels_and_legger_from_water_board(monkeypatch: pytest.Mon
         lambda bbox, board: waterschap.parse_reaches(raw["lines"], raw["attributes"]),
     )  # fmt: skip
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
-    at = AppTest.from_file(page, default_timeout=120).run()
+    at = _toolbox(page, 120)
     at.toggle(key="p3_geo").set_value(True).run()
     at.number_input(key="p3_cx").set_value(186000.0).run()
     at.number_input(key="p3_cy").set_value(512000.0).run()
@@ -619,11 +631,19 @@ def test_grid_product_levels_and_legger_from_water_board(monkeypatch: pytest.Mon
     at.button(key="p3_top10_get").click().run()
     assert not at.exception, [e.value for e in at.exception]
     preview = at.dataframe[-1].value
-    assert set(preview["Bodem uit"]) <= {"legger", "legger, aangepast", "aanname"}
-    assert preview["Bodem uit"].str.startswith("legger").sum() >= len(preview) - 2
+    assert set(preview["Watergang"]) == {"Legger primair"}  # the default: primary only
+    at.multiselect(key="p3_kinds_1").set_value(["legger 1", "legger 2"]).run()
+    preview = at.dataframe[-1].value
+    assert set(preview["Watergang"]) == {"Legger primair", "Legger secundair"}
+    assert all(
+        v in {"legger", "legger, aangepast", "aanname"} or v.startswith("deels legger")
+        for v in preview["Bodem uit"]
+    )
+    assert preview["Bodem uit"].str.contains("legger").sum() >= len(preview) - 2
     at.button(key="p3_top10_add").click().run()
     wcs = at.session_state["p3_wcs"]
     assert wcs and all("gebied" in wc["name"] for wc in wcs)
+    assert any(wc.get("line_offsets") for wc in wcs)  # legger bottoms kept per line
     zomer = {"64": -0.1, "1029": -0.4, "126": -0.65, "125": -1.0, "159": -0.4, "128": -0.85,
              "63": -0.4, "127": -0.1}  # fmt: skip
     for wc in wcs:
@@ -634,6 +654,43 @@ def test_grid_product_levels_and_legger_from_water_board(monkeypatch: pytest.Mon
     at.button(key="p3_calc").click().run()
     assert not at.exception, [e.value for e in at.exception]
     assert not at.error, [e.value for e in at.error]
+    par = at.session_state["p3_result"]["params"]
+    assert any(wc.bottom_offsets for wc in par.watercourses)
+    for style in ("cellen", "uit", "lijnen"):
+        at.selectbox(key="p3_wcstyle").set_value(style).run()
+        assert not at.exception, [e.value for e in at.exception]
+
+
+def test_wc_geometry_bottom_offsets_and_result_styles() -> None:
+    """Bottom offset per cell = length-weighted mean of the lines through it; the result map
+    draws watercourses as thin lines (one legend entry), coloured cells, or not at all."""
+    import sys
+
+    import numpy as np
+
+    sys.path.insert(0, str(APP))
+    from grid_ui import result_figure, wc_geometry
+
+    wc = {
+        "lines": [[(0.0, 12.5), (50.0, 12.5)], [(37.5, 0.0), (37.5, 50.0)]],
+        "line_offsets": [0.2, -0.4], "points": {(87.5, 87.5)}, "length": 25.0,
+    }  # fmt: skip
+    cells, lengths, offsets = wc_geometry(wc, 25.0, 4, 4)
+    by_cell = dict(zip(cells, offsets, strict=True))
+    assert by_cell[(0, 0)] == pytest.approx(0.2) and by_cell[(1, 1)] == pytest.approx(-0.4)
+    assert by_cell[(0, 1)] == pytest.approx((25 * 0.2 + 25 * -0.4) / 50)
+    assert by_cell[(3, 3)] == 0.0  # a lasso cell: the watercourse bottom
+    assert wc_geometry({**wc, "line_offsets": []}, 25.0, 4, 4)[2] is None
+    x = y = (np.arange(4) + 0.5) * 25.0
+    view = [{"name": "w", "cells": cells, "lines": wc["lines"]}]
+    names = lambda f: [t.name for t in f.data]  # noqa: E731
+    thin = result_figure(x, y, np.zeros((4, 4)), 25.0, view, label="h", wc_style="lijnen")
+    assert names(thin).count("w") == 2 and "watergangen" in names(thin)  # line + lasso cell
+    assert [t.showlegend for t in thin.data if t.name == "w"] == [False, False]
+    cells_fig = result_figure(x, y, np.zeros((4, 4)), 25.0, view, label="h", wc_style="cellen")
+    assert names(cells_fig).count("w") == 1
+    off = result_figure(x, y, np.zeros((4, 4)), 25.0, view, label="h", wc_style="uit")
+    assert "w" not in names(off)
 
 
 def test_grid_product_walls_split_and_project() -> None:
@@ -648,7 +705,7 @@ def test_grid_product_walls_split_and_project() -> None:
     from project_io import export_project, parse_project
 
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
-    at = AppTest.from_file(page, default_timeout=120).run()
+    at = _toolbox(page, 120)
     at.session_state["p3_walls"] = [
         {"name": "scherm", "layer": "pakket1", "impermeable": True, "resistance": 100.0,
          "reference": False, "lines": [[(500.0, 300.0), (500.0, 700.0)]]},
@@ -695,3 +752,47 @@ def test_grid_product_walls_split_and_project() -> None:
     assert not at.exception, [e.value for e in at.exception]
     split = at.session_state["p3_result"]["params"].stack
     assert [round(lay.thickness, 2) for lay in split.layers] == [5.0, 2.0, 8.0, 0.1, 11.9]
+
+
+def test_grid_product_pick_watercourse_edit_and_remove() -> None:
+    """'aanwijzen': the picked watercourse is outlined in red on the drawing map; its values
+    are edited in place, and it can be removed. (The map click itself sets p3_wc_hits.)"""
+    page = str(APP / "pages" / "1_Grondwatertoolbox.py")
+    at = _toolbox(page, 120)
+    at.radio(key="p3_wc_how").set_value("aanwijzen").run()
+    assert not at.exception, [e.value for e in at.exception]
+    at.session_state["p3_wc_hits"] = ["Wetering"]
+    at.run()
+    names = [t.name for t in at.session_state["p3_fig_draw"].data]
+    assert "aangewezen: Wetering" in names
+    ver = at.session_state["p3_ver"]
+    at.number_input(key=f"p3_pk_stage_new_{ver}").set_value(4.2).run()
+    at.button(key="p3_pk_save").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    wet = next(wc for wc in at.session_state["p3_wcs"] if wc["name"] == "Wetering")
+    assert wet["stage_new"] == pytest.approx(4.2)
+    at.button(key="p3_pk_del").click().run()
+    assert "Wetering" not in [wc["name"] for wc in at.session_state["p3_wcs"]]
+    assert not at.exception, [e.value for e in at.exception]
+
+
+def test_project_keeps_bottom_per_line() -> None:
+    import sys
+
+    sys.path.insert(0, str(APP))
+    import project_io as pio
+    from grid_ui import wc_geometry
+
+    wc = {
+        "name": "a", "kind": "riv", "stage_ref": 0.0, "stage_new": 0.0, "bottom": -1.0,
+        "width": 1.0, "length": 25.0, "entry_resistance": 1.0, "conductance": 0.0,
+        "lines": [[(0.0, 12.5), (50.0, 12.5)], [(37.5, 0.0), (37.5, 50.0)]],
+        "line_offsets": [0.2, -0.4], "points": set(), "manual": {}, "manual_cell": 25.0,
+    }  # fmt: skip
+    state = {"p3_wcs": [wc], "p3_drain": set(), "p3_wells": [], "p3_ghb": [], "p3_walls": [],
+             "p3_zones": []}  # fmt: skip
+    data, errors = pio.parse_project(pio.to_json(state, "p3"))
+    assert not errors
+    loaded: dict = {}
+    pio.apply_project(loaded, "p3", data)
+    assert wc_geometry(loaded["p3_wcs"][0], 25.0, 4, 4) == wc_geometry(wc, 25.0, 4, 4)

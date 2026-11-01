@@ -71,6 +71,15 @@ CASES = {
                                                  for c in range(19, 23)}, 40, 40), "pakket1",
                        20.0),),
     ),
+    "bodem per cel (legger), deklaag": p3.Params(
+        stack=CLAY,
+        watercourses=tuple(
+            dataclasses.replace(
+                wc, bottom_offsets=tuple((-0.4, 0.0, 0.2)[k % 3] for k in range(len(wc.cells)))
+            )
+            for wc in p3.default_watercourses(1000.0, 1000.0, 25.0)
+        ),
+    ),
 }  # fmt: skip
 
 
