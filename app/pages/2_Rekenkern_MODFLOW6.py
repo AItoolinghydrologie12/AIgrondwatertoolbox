@@ -200,7 +200,7 @@ with vergelijk:
         fig = result_figure(
             own.x, own.y, z, params.cell, done["wcs"], label="h_MF6 − h_eigen [m]",
             diverging=True, wells=[{"name": g.name, "cells": g.cells} for g in params.wells],
-            min_span=0.01,
+            min_span=0.01, wc_style="lijnen",
         )  # fmt: skip
         st.plotly_chart(fig, width="stretch", config=MAP_CONFIG, key=f"{KEY}_cmp_map")
         st.caption("Blauw = MODFLOW 6 hoger, rood = lager dan de eigen solver. Verschillen "

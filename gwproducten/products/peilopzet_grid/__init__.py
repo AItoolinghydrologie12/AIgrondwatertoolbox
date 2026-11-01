@@ -75,9 +75,17 @@ class Watercourse:
     entry_resistance: float = param(1.0, "d", "Intreeweerstand", 0.0, 1e4)
     conductance: float = param(0.0, "m²/d", "Conductance per cel (0 = berekenen)", 0.0, 1e8)
     lengths: tuple[float, ...] | None = None  # length per cell [m]; None = ``length`` everywhere
+    # bottom per cell = bottom + offset [m] (e.g. legger bottoms along an imported ditch);
+    # None = ``bottom`` everywhere
+    bottom_offsets: tuple[float, ...] | None = None
 
     def cell_lengths(self) -> tuple[float, ...]:
         return self.lengths if self.lengths is not None else (self.length,) * len(self.cells)
+
+    def cell_bottoms(self) -> tuple[float, ...]:
+        if self.bottom_offsets is None:
+            return (self.bottom,) * len(self.cells)
+        return tuple(round(self.bottom + d, 6) for d in self.bottom_offsets)
 
 
 @dataclass(frozen=True)
@@ -283,21 +291,33 @@ class Params:
                 errors.append(
                     f"{prefix}lengte per cel moet groter dan 0 en hooguit {5 * self.cell:g} m zijn."
                 )
-            if min(wc.stage_ref, wc.stage_new) <= wc.bottom:
-                errors.append(f"{prefix}de bodem ({wc.bottom:g} m NAP) ligt boven het peil.")
+            if wc.bottom_offsets is not None and len(wc.bottom_offsets) != len(wc.cells):
+                errors.append(f"{prefix}het aantal bodemhoogtes past niet bij het aantal cellen.")
                 continue
-            inside = [(r, c) for r, c in wc.cells if 0 <= r < self.nrow and 0 <= c < self.ncol]
-            for z in sorted({int(zmap[r, c]) for r, c in inside}):
+            top = max(wc.cell_bottoms(), default=wc.bottom)
+            if min(wc.stage_ref, wc.stage_new) <= top:
+                errors.append(f"{prefix}de bodem ({top:g} m NAP) ligt boven het peil.")
+                continue
+            pairs = {
+                (int(zmap[r, c]), b)
+                for (r, c), b in zip(wc.cells, wc.cell_bottoms(), strict=True)
+                if 0 <= r < self.nrow and 0 <= c < self.ncol
+            }
+            found: list[str] = []
+            for z, b in sorted(pairs):
                 stack_z, surface_z = cols[z]
                 where = "" if z == 0 else f" (zone {self.zones[z - 1].name})"
-                if wc.bottom >= surface_z:
-                    errors.append(f"{prefix}de bodem ligt boven maaiveld{where}.")
+                if b >= surface_z:
+                    found.append(f"{prefix}de bodem ligt boven maaiveld{where}.")
                 else:
-                    errors += [
+                    found += [
                         e + where
-                        for e in Subsoil(stack=stack_z).ditch_errors(as_ditch(self, wc, surface_z))
+                        for e in Subsoil(stack=stack_z).ditch_errors(
+                            as_ditch(self, wc, surface_z, b)
+                        )
                         if "Positie" not in e
                     ]
+            errors += list(dict.fromkeys(found))  # one message per distinct problem
         if any(not (0 <= r < self.nrow and 0 <= c < self.ncol) for r, c in self.drain_cells):
             errors.append("Buisdrainage: een of meer cellen liggen buiten het rooster.")
         errors += self._wall_errors(node_keys)
@@ -512,14 +532,18 @@ def _convertible(params: Params) -> list[Convertible | None]:
     ]
 
 
-def as_ditch(params: Params, wc: Watercourse, surface: float | None = None) -> Ditch:
+def as_ditch(
+    params: Params, wc: Watercourse, surface: float | None = None, bottom: float | None = None
+) -> Ditch:
     """Cross-section of a watercourse (reference water depth) for its conductance;
-    ``surface``: local surface level (default: the base surface)."""
+    ``surface``: local surface level (default: the base surface); ``bottom``: the bottom of
+    one cell (default: the watercourse bottom)."""
+    bottom = wc.bottom if bottom is None else bottom
     return Ditch(
         name=wc.name,
         width=wc.width,
-        bottom_depth=(params.surface if surface is None else surface) - wc.bottom,
-        water_depth=wc.stage_ref - wc.bottom,
+        bottom_depth=(params.surface if surface is None else surface) - bottom,
+        water_depth=wc.stage_ref - bottom,
         entry_resistance=wc.entry_resistance,
     )
 
@@ -603,13 +627,14 @@ def _cell_conductances(
     for wc in params.watercourses:
         lengths = wc.cell_lengths()
         zone_of = np.array([zmap[r, c] for r, c in wc.cells], dtype=int)
+        bottom_of = np.array(wc.cell_bottoms(), dtype=float)
         acc: dict[int, list[tuple[int, float]]] = {}
-        for z in np.unique(zone_of):
+        for z, b in sorted({(int(z), float(b)) for z, b in zip(zone_of, bottom_of, strict=True)}):
             stack_z, surface_z = cols[z]
             sub_z = Subsoil(stack=stack_z)
             nodes = sub_z.nodes
             res_between = stack_z.node_resistances()
-            parts = sub_z.conductance_parts(as_ditch(params, wc, surface_z))
+            parts = sub_z.conductance_parts(as_ditch(params, wc, surface_z, b))
             total = sum(C for _, C in parts)
             for node, C in parts:
                 leak = 0.0
@@ -617,7 +642,7 @@ def _cell_conductances(
                     leak += 1.0 / res_between[node - 1]
                 if node < len(nodes) - 1:
                     leak += 1.0 / res_between[node]
-                for k in np.flatnonzero(zone_of == z):
+                for k in np.flatnonzero((zone_of == z) & (bottom_of == b)):
                     (r, c), L = wc.cells[k], lengths[k]
                     lk = leak + (
                         1.0 / params.drain_resistance if node == 0 and drained[r, c] else 0.0
@@ -651,13 +676,10 @@ def _boundaries(params: Params, sub: Subsoil, stage: str, cond) -> list[HeadBoun
         rc = np.array(wc.cells, dtype=int).reshape(-1, 2)
         keys_a = np.concatenate([idx[node, rc[pos, 0], rc[pos, 1]] for node, pos, _ in per_node])
         C_a = np.concatenate([C for _, _, C in per_node])
+        bottoms = np.array(wc.cell_bottoms(), dtype=float)
+        bot_a = np.concatenate([bottoms[pos] for _, pos, _ in per_node])
         level = wc.stage_ref if stage == "ref" else wc.stage_new
-        out.append(
-            HeadBoundary(
-                wc.name, wc.kind, keys_a, C_a, np.full(keys_a.size, level),
-                np.full(keys_a.size, wc.bottom),
-            )
-        )  # fmt: skip
+        out.append(HeadBoundary(wc.name, wc.kind, keys_a, C_a, np.full(keys_a.size, level), bot_a))
     area = params.cell**2
     surface = surface_map(params)
     if params.drain_cells:
@@ -870,9 +892,12 @@ def compute(params: Params) -> Result:
             "celgrootte-correctie houdt de uitwisseling goed; verklein de cel voor meer detail."
         )
     for wc in params.watercourses:  # bottom in an aquitard: approximated connection
-        for z in sorted({int(zmap[r, c]) for r, c in wc.cells}):
+        pairs = {
+            (int(zmap[r, c]), b) for (r, c), b in zip(wc.cells, wc.cell_bottoms(), strict=True)
+        }
+        for z, b in sorted(pairs):
             stack_z, surface_z = cols[z]
-            lay = stack_z.layers[stack_z.layer_at_depth(surface_z - wc.bottom + 1e-9)]
+            lay = stack_z.layers[stack_z.layer_at_depth(surface_z - b + 1e-9)]
             if lay.kind == "scheidend":
                 where = "" if z == 0 else f" (zone {zone_names[z]})"
                 warnings.append(

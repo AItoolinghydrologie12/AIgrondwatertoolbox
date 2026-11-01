@@ -11,7 +11,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from draw_actions import NEW, apply_selection
-from grid_ui import add_background, centre_key, drawing_figure, line_snap
+from grid_ui import add_background, centre_key, drawing_figure, line_snap, to_cells
 from location_ui import background, background_caption, background_inputs, model_bbox
 from streamlit.errors import StreamlitAPIException
 from toolbox_state import DEFAULT_RADIUS, KEY, MAP_CONFIG, Grid, bump, example, reset, ss
@@ -38,7 +38,11 @@ OBJECTS = {
     "damwand": "Damwand",
     "zone": "Zone",
 }
-WC_MODES = {"lijn": "lijn klikken", "cellen": "cellen selecteren", "wissen": "cellen weghalen"}
+WC_MODES = {
+    "lijn": "lijn klikken", "cellen": "cellen selecteren", "wissen": "cellen weghalen",
+    "aanwijzen": "aanwijzen en aanpassen",
+}  # fmt: skip
+PICK_FIELDS = ["kind", "stage_ref", "stage_new", "bottom", "width", "entry_resistance"]
 WALL_MODES = {"lijn": "lijn langs celranden", "rondom": "rondom selectie"}
 WALL_RESISTANCE = 100.0  # [d] starting value when a wall is made leaky
 GROUP_COLUMNS = {
@@ -337,6 +341,60 @@ def watercourse_tables(grid: Grid) -> None:
             st.rerun()
 
 
+def pick_panel(wcs_view: list[dict[str, Any]]) -> None:
+    """Edit or remove the watercourse picked on the map (it is highlighted there)."""
+    names = [wc["name"] for wc in ss[f"{KEY}_wcs"]]
+    hits = [n for n in ss.get(f"{KEY}_wc_hits", []) if n in names]
+    if not hits:
+        st.caption(
+            "Klik op een cel van een watergang (of trek een rechthoek): die licht rood op en "
+            "je past hem hier aan. De naam zie je ook als je over de kaart beweegt."
+        )
+        return
+    if ss.get(f"{KEY}_wc_pick") not in hits:
+        ss[f"{KEY}_wc_pick"] = hits[0]
+    name = st.selectbox(
+        f"Aangewezen watergang ({len(hits)} in de selectie)" if len(hits) > 1
+        else "Aangewezen watergang",
+        hits, key=f"{KEY}_wc_pick",
+    )  # fmt: skip
+    wc = ss[f"{KEY}_wcs"][names.index(name)]
+    view = wcs_view[names.index(name)]
+    st.caption(
+        f"{len(view['cells'])} cellen, {sum(view['lengths']):.0f} m"
+        + (
+            "; bodem per stuk uit de legger (hier het gemiddelde; aanpassen schuift alles mee)"
+            if view.get("bottom_offsets")
+            else ""
+        )
+    )
+    ver = ss[f"{KEY}_ver"]
+    c1, c2 = st.columns(2)
+    new: dict[str, Any] = {
+        "kind": c1.selectbox(
+            WC_COLUMNS["kind"], p3.KINDS, index=list(p3.KINDS).index(wc["kind"]),
+            format_func=p3.KIND_LABEL.get, key=f"{KEY}_pk_kind_{ver}",
+        ),
+    }  # fmt: skip
+    for k, f in enumerate(PICK_FIELDS[1:]):
+        col = (c2, c1)[k % 2]
+        new[f] = col.number_input(
+            WC_COLUMNS[f], value=float(wc[f]), step=0.05 if f != "entry_resistance" else 0.5,
+            format="%.2f", key=f"{KEY}_pk_{f}_{ver}",
+        )  # fmt: skip
+    b1, b2 = st.columns(2)
+    if b1.button("Opslaan", type="primary", key=f"{KEY}_pk_save"):
+        wc.update(new)
+        bump()
+        st.rerun()
+    if b2.button("Verwijderen", key=f"{KEY}_pk_del", icon=":material/delete:"):
+        ss[f"{KEY}_wcs"] = [w for w in ss[f"{KEY}_wcs"] if w["name"] != name]
+        ss[f"{KEY}_wc_hits"] = [n for n in hits if n != name]
+        ss.pop(f"{KEY}_wc_pick", None)
+        bump()
+        st.rerun()
+
+
 def draw_step(
     grid: Grid,
     values: dict[str, Any],
@@ -404,16 +462,20 @@ def draw_panel(
                 format_func={"toevoegen": "cellen toevoegen", "verwijderen": "cellen weghalen"}.get,
             )  # fmt: skip
     line_mode = obj in ("watergang", "damwand") and how == "lijn"
+    point_mode = obj == "watergang" and how == "aanwijzen"
     snap = None
     if line_mode:  # a wall follows the grid lines: click the cell corners
         snap = cell if obj == "damwand" else line_snap(cell, values["size_x"], values["size_y"])
+    wcs_view = grid.watercourses()
+    hits = ss.get(f"{KEY}_wc_hits", []) if point_mode else []
+    pick = ss.get(f"{KEY}_wc_pick") if ss.get(f"{KEY}_wc_pick") in hits else next(iter(hits), None)
 
     with col_map:
         fig_draw = drawing_figure(
-            nrow, ncol, cell, grid.watercourses(), grid.drain_cells(),
+            nrow, ncol, cell, wcs_view, grid.drain_cells(),
             current_line=ss[f"{KEY}_line"], snap=snap, wells=grid.groups("wells"),
             ghbs=grid.groups("ghb"), zones=grid.zones(zone_values),
-            outlines=area_outlines(grid, values), walls=grid.walls(),
+            outlines=area_outlines(grid, values), walls=grid.walls(), highlight=pick,
         )  # fmt: skip
         width, height = ncol * cell, nrow * cell
         bbox = model_bbox(values["origin_x"], values["origin_y"], width, height)
@@ -421,10 +483,14 @@ def draw_panel(
         ss[f"{KEY}_fig_draw"] = fig_draw
         # A stable key keeps zoom and pan between reruns; each selection is used only once
         # (``fresh``) instead of clearing it with a new key.
-        draw_key = f"{KEY}_draw_{'lijn' if line_mode else 'cel'}"
+        draw_key = f"{KEY}_draw_{'lijn' if line_mode else 'wijs' if point_mode else 'cel'}"
         event = st.plotly_chart(
             fig_draw, key=draw_key, on_select="rerun", config=MAP_CONFIG, width="stretch",
-            selection_mode=("points",) if line_mode else ("box", "lasso"),
+            selection_mode=(
+                ("points",) if line_mode
+                else ("points", "box", "lasso") if point_mode
+                else ("box", "lasso")
+            ),
         )  # fmt: skip
         background_caption()
         target_curve = len(fig_draw.data) - 1
@@ -442,6 +508,13 @@ def draw_panel(
         if not ss[f"{KEY}_line"] or ss[f"{KEY}_line"][-1] != pt:
             ss[f"{KEY}_line"].append(pt)
         _rerun_panel()  # the line in progress is not part of the model yet
+    if point_mode and fresh:
+        ss[f"{KEY}_used_sel"] = selection_id
+        cells = set(to_cells(set(picked), cell, nrow, ncol))
+        hits = [v["name"] for v in wcs_view if cells & set(v["cells"])]
+        ss[f"{KEY}_wc_hits"] = hits
+        ss[f"{KEY}_wc_pick"] = hits[0] if hits else None
+        _rerun_panel()  # show the highlight
 
     with col_ctl:
         wcs = ss[f"{KEY}_wcs"]
@@ -449,7 +522,9 @@ def draw_panel(
         selected = set(picked) if fresh and not line_mode else set()
         target = None
         props: dict[str, Any] = {}
-        if obj == "watergang" and how != "wissen":
+        if point_mode:
+            pick_panel(wcs_view)
+        elif obj == "watergang" and how != "wissen":
             target = st.selectbox(
                 "Watergang", [NEW, *[wc["name"] for wc in wcs]], key=f"{KEY}_wc_target",
                 format_func=lambda n: "+ nieuwe watergang" if n == NEW else n,
@@ -501,7 +576,7 @@ def draw_panel(
                 ss[f"{KEY}_line"] = []
                 bump()
                 st.rerun()
-        else:
+        elif not point_mode:
             st.markdown(f"**Selectie: {len(selected)} cellen**")
             if st.button("Toepassen", type="primary", disabled=not selected, key=f"{KEY}_apply"):
                 apply_selection(ss, KEY, (cell, nrow, ncol), obj, how, target, props, selected)

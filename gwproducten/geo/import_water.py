@@ -5,7 +5,9 @@
 - every line is cut into pieces of at most ``STEP`` and each piece gets the level area
   (peilgebied) holding its midpoint, so a line is split where the level changes;
 - bottom = legger bottom (mean of upstream and downstream) where known, else level - depth;
-- pieces with the same source, level area, width and bottom form one watercourse.
+  every piece keeps its own bottom;
+- connected pieces with the same source, level area and width form one watercourse (its
+  bottom is the length-weighted mean, each line keeps its offset from that mean).
 
 Everything here works in model metres (origin at the lower-left corner of the model).
 """
@@ -13,10 +15,11 @@ Everything here works in model metres (origin at the lower-left corner of the mo
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 
 import numpy as np
+from scipy import ndimage
 from scipy.spatial import cKDTree
 
 from gwproducten.geo import water
@@ -25,10 +28,17 @@ from gwproducten.geo.waterschap import LEVEL_LABEL, LevelArea, Reach
 STEP = 10.0  # m, longest piece of a line
 NEAR = 10.0  # m, TOP10NL pieces closer to a legger line are dropped
 MAX_GROUPS = 40
+JOIN = 1.0  # m; a piece whose end lies this close to another piece is connected to it
+WIDTH_STEP = 0.25  # m, rounding of the width
 MIN_DEPTH = 0.10  # m; a bottom closer to (or above) the level is set to level - MIN_DEPTH
 MAX_CELL_LENGTH = 5.0  # x cell: the model's upper limit of watercourse length per cell
 DEPTHS = {  # default water depth [m] where the legger has no bottom
     "legger 1": 1.0, "legger 2": 0.6, "0,5 - 3 meter": 0.4, "3 - 6 meter": 0.8, "breed": 1.5,
+}  # fmt: skip
+KINDS = {  # what can be fetched (DEPTHS keys) -> label
+    "legger 1": "Legger primair", "legger 2": "Legger secundair",
+    "0,5 - 3 meter": "TOP10NL 0,5–3 m", "3 - 6 meter": "TOP10NL 3–6 m",
+    "breed": "TOP10NL breder / vlakken",
 }  # fmt: skip
 
 Points = list[tuple[float, float]]
@@ -40,11 +50,21 @@ class Group:
     area: str | None  # level area code, None outside every area
     stage: float  # m NAP, NaN if unknown
     width: float
-    bottom: float  # m NAP, NaN if unknown
-    bottom_from_legger: bool
+    bottom: float  # m NAP, length-weighted mean of the pieces; NaN if unknown
+    legger_share: float = 0.0  # part of the length with its bottom from the legger
     bottom_adjusted: bool = False  # legger bottom at/above the level: set to level - MIN_DEPTH
     lines: list[Points] = field(default_factory=list)
+    line_bottoms: list[float] = field(default_factory=list)  # m NAP, one per line
     cells: dict[tuple[int, int], float] = field(default_factory=dict)  # area water: length
+
+    @property
+    def bottom_from_legger(self) -> bool:
+        return self.legger_share > 0.999
+
+    @property
+    def line_offsets(self) -> list[float]:
+        """Bottom of each line relative to the watercourse bottom [m]."""
+        return [round(b - self.bottom, 3) for b in self.line_bottoms]
 
     @property
     def length(self) -> float:
@@ -124,6 +144,27 @@ def _stage(areas: list[LevelArea], i: int, choice: str, fallback: float, notes: 
     return value
 
 
+@dataclass
+class _Piece:
+    """A line piece (``line``) or the area-water cells (``cells``) of one level area."""
+
+    label: str
+    area: int  # level area index, -1 outside all
+    stage: float
+    width: float
+    bottom: float
+    known: bool  # bottom from the legger
+    line: Points | None = None
+    cells: dict[tuple[int, int], float] | None = None
+    adjusted: bool = False
+
+    @property
+    def length(self) -> float:
+        if self.line is not None:
+            return sum(math.dist(a, b) for a, b in zip(self.line[:-1], self.line[1:], strict=True))
+        return sum((self.cells or {}).values())
+
+
 def combine(
     top10: list[water.Water],
     reaches: list[Reach],
@@ -134,12 +175,16 @@ def combine(
     choice: str = "winter",
     depths: dict[str, float] | None = None,
     default_stage: float = math.nan,
+    include: Collection[str] | None = None,
 ) -> Result:
-    """Model watercourses (see module docstring). ``grid`` = (cell, nrow, ncol)."""
+    """Model watercourses (see module docstring). ``grid`` = (cell, nrow, ncol); ``include``:
+    the KINDS to keep (default all). Left-out legger reaches still remove the TOP10NL water
+    along them, so TOP10NL stays 'the rest'."""
     depths = {**DEPTHS, **(depths or {})}
+    include = set(KINDS if include is None else include)
     cell, nrow, ncol = grid
     notes: set[str] = set()
-    raw: list[tuple[str, int, float, float, bool, Points | None, dict | None]] = []
+    pieces: list[_Piece] = []
 
     legger_pts: list[np.ndarray] = []
     for r in reaches:
@@ -148,12 +193,14 @@ def combine(
         for line in r.lines:
             dense = densify(water.to_local(line, *origin), STEP / 2)
             legger_pts.append(np.asarray(dense))
+            if key not in include:
+                continue
             for i, piece in split_by_area(dense, areas, origin):
                 stage = _stage(areas, i, choice, default_stage, notes)
                 known = math.isfinite(r.bottom)
                 bottom = r.bottom if known else stage - depths[key]
                 width = r.width if math.isfinite(r.width) and r.width > 0 else 1.0
-                raw.append((label, i, stage, width, bottom, known, piece, None))  # type: ignore[arg-type]
+                pieces.append(_Piece(label, i, stage, width, bottom, known, line=piece))
     tree = cKDTree(np.vstack(legger_pts)) if legger_pts else None
 
     capped = False
@@ -162,6 +209,8 @@ def combine(
         if w.area and w.width_class == "onbekend":
             width = water.WIDE_WIDTH  # an area without width class is wide water
         key = w.width_class if w.width_class in depths else "breed"
+        if key not in include:
+            continue
         label = (
             f"TOP10NL {w.width_class.replace(' meter', ' m')}"
             if w.width_class != "onbekend"
@@ -190,7 +239,8 @@ def combine(
                     if j == i and not n
                 }
                 stage = _stage(areas, i, choice, default_stage, notes)
-                raw.append((label, i, stage, width, stage - depths["breed"], False, None, part))  # type: ignore[arg-type]
+                bottom = stage - depths["breed"]
+                pieces.append(_Piece(label, i, stage, width, bottom, False, cells=part))
             continue
         dense = densify(water.to_local(w.parts[0], *origin))
         p = np.asarray(dense)
@@ -202,21 +252,23 @@ def combine(
         )
         for i, piece in split_by_area(dense, areas, origin, keep):
             stage = _stage(areas, i, choice, default_stage, notes)
-            raw.append((label, i, stage, width, stage - depths[key], False, piece, None))  # type: ignore[arg-type]
+            pieces.append(_Piece(label, i, stage, width, stage - depths[key], False, line=piece))
 
-    groups, coarse = _group(raw, areas)
-    if coarse:
+    dry: set[str] = set()
+    for pc in pieces:
+        pc.bottom = round(pc.bottom, 2) if math.isfinite(pc.bottom) else math.nan
+        if math.isfinite(pc.stage) and pc.bottom > pc.stage - MIN_DEPTH:
+            if pc.known:
+                dry.add(areas[pc.area].code if pc.area >= 0 else "-")
+                pc.adjusted = True
+            pc.bottom = round(pc.stage - MIN_DEPTH, 2)
+    groups, merged = _group(pieces, areas)
+    if merged:
         notes.add(
-            f"Veel verschillende profielen: bodem afgerond op {coarse[0]:g} m en breedte op "
-            f"{coarse[1]:g} m om het aantal watergangen te beperken (max. {MAX_GROUPS})."
+            f"Meer dan {MAX_GROUPS} losse watergangen: stukken van dezelfde soort, peilgebied "
+            "en breedte zijn samengevoegd, ook als ze niet aan elkaar vastzitten. Kies minder "
+            "soorten voor een overzichtelijker tabel."
         )
-    dry = set()
-    for g in groups:
-        if math.isfinite(g.stage) and g.bottom > g.stage - MIN_DEPTH:
-            if g.bottom_from_legger:
-                dry.add(g.area or "-")
-                g.bottom_adjusted = True
-            g.bottom = round(g.stage - MIN_DEPTH, 2)
     if dry:
         notes.add(
             "Bodem uit de legger ligt op of boven het gekozen peil in peilgebied "
@@ -234,26 +286,106 @@ def combine(
     return Result(groups, sorted(notes))
 
 
-def _group(raw: list, areas: list[LevelArea]) -> tuple[list[Group], tuple[float, float] | None]:
-    """Groups of equal source, area, width and bottom; rounding gets coarser until there are
-    at most MAX_GROUPS. Returns (groups, the coarser rounding used or None)."""
-    steps = ((0.1, 0.25), (0.25, 1.0), (0.5, 2.0), (1.0, 5.0))
-    for bottom_step, width_step in steps:
-        groups: dict[tuple, Group] = {}
-        for label, i, stage, width, bottom, known, piece, cells in raw:
-            w = max(round(width / width_step) * width_step, width_step)
-            b = round(bottom / bottom_step) * bottom_step if math.isfinite(bottom) else math.nan
-            key = (label, i, w, b if math.isfinite(b) else None, known)
-            if key not in groups:
-                area = areas[i].code if i >= 0 else None
-                groups[key] = Group(label, area, stage, w, b, known)
-            g = groups[key]
-            if piece is not None:
-                g.lines.append(piece)
+def connected_lines(lines: list[Points], tol: float = JOIN) -> list[list[int]]:
+    """Indices of the lines per connected set: two lines are connected when an end of one
+    lies within ``tol`` of the other (end to end, or a side ditch onto a main ditch)."""
+    n = len(lines)
+    if n == 0:
+        return []
+    parent = list(range(n))
+
+    def root(k: int) -> int:
+        while parent[k] != k:
+            parent[k] = parent[parent[k]]
+            k = parent[k]
+        return k
+
+    seg_a = np.vstack([np.asarray(ln[:-1], dtype=float) for ln in lines])
+    seg_b = np.vstack([np.asarray(ln[1:], dtype=float) for ln in lines])
+    owner = np.concatenate([np.full(len(ln) - 1, k) for k, ln in enumerate(lines)])
+    d = seg_b - seg_a
+    dd = np.maximum((d**2).sum(axis=1), 1e-12)
+    for k, ln in enumerate(lines):
+        for end in (ln[0], ln[-1]):
+            e = np.asarray(end, dtype=float)
+            t = np.clip(((e - seg_a) * d).sum(axis=1) / dd, 0.0, 1.0)
+            dist = np.hypot(*(seg_a + t[:, None] * d - e).T)
+            for j in set(owner[(dist <= tol) & (owner != k)].tolist()):
+                parent[root(j)] = root(k)
+    sets: dict[int, list[int]] = {}
+    for k in range(n):
+        sets.setdefault(root(k), []).append(k)
+    return list(sets.values())
+
+
+def _cell_sets(cells: dict[tuple[int, int], float]) -> list[dict[tuple[int, int], float]]:
+    """Area-water cells per connected set (8-connected)."""
+    rc = np.array(list(cells))
+    r0, c0 = rc.min(axis=0)
+    mask = np.zeros(tuple(rc.max(axis=0) - (r0, c0) + 1), dtype=bool)
+    mask[rc[:, 0] - r0, rc[:, 1] - c0] = True
+    labels, n = ndimage.label(mask, structure=np.ones((3, 3)))
+    out: list[dict[tuple[int, int], float]] = [{} for _ in range(n)]
+    for (r, c), length in cells.items():
+        out[labels[r - r0, c - c0] - 1][(r, c)] = length
+    return out
+
+
+def _group(pieces: list[_Piece], areas: list[LevelArea]) -> tuple[list[Group], bool]:
+    """Watercourses: per source, level area and width (rounded to WIDTH_STEP) the connected
+    lines, and the connected area-water cells. With more than MAX_GROUPS the split by
+    connection is dropped (returns merged=True)."""
+    buckets: dict[tuple, list[_Piece]] = {}
+    for pc in pieces:
+        w = max(round(pc.width / WIDTH_STEP) * WIDTH_STEP, WIDTH_STEP)
+        buckets.setdefault((pc.label, pc.area, w), []).append(pc)
+
+    def sets(merge: bool) -> list[tuple[tuple, list[_Piece], dict | None]]:
+        out: list[tuple[tuple, list[_Piece], dict | None]] = []
+        for key, members in buckets.items():
+            lines = [pc for pc in members if pc.line is not None]
+            if lines:
+                parts = (
+                    [list(range(len(lines)))]
+                    if merge
+                    else connected_lines([pc.line for pc in lines])  # type: ignore[misc]
+                )
+                out += [(key, [lines[k] for k in part], None) for part in parts]
+            cells: dict[tuple[int, int], float] = {}
+            for pc in members:
+                for c, length in (pc.cells or {}).items():
+                    cells[c] = cells.get(c, 0.0) + length
             if cells:
-                for c, length in cells.items():
-                    g.cells[c] = g.cells.get(c, 0.0) + length
-        if len(groups) <= MAX_GROUPS:
-            break
-    coarse = None if (bottom_step, width_step) == steps[0] else (bottom_step, width_step)
-    return sorted(groups.values(), key=lambda g: (g.area or "~", g.source, g.bottom)), coarse
+                area_pcs = [pc for pc in members if pc.cells]
+                out += [(key, area_pcs, part) for part in ([cells] if merge else _cell_sets(cells))]
+        return out
+
+    found = sets(merge=False)
+    merged = len(found) > MAX_GROUPS
+    if merged:
+        found = sets(merge=True)
+    groups = []
+    for (label, i, w), members, cells in found:
+        code = areas[i].code if i >= 0 else None
+        if cells is not None:  # area water: one bottom per bucket
+            groups.append(Group(label, code, members[0].stage, w, members[0].bottom, cells=cells))
+            continue
+        lengths = np.array([pc.length for pc in members])
+        bottoms = np.array([pc.bottom for pc in members])
+        total = max(float(lengths.sum()), 1e-9)
+        mean = (
+            round(float((lengths * bottoms).sum() / total), 2)
+            if np.isfinite(bottoms).all()
+            else math.nan
+        )
+        groups.append(
+            Group(
+                label, code, members[0].stage, w, mean,
+                legger_share=float(lengths[[pc.known for pc in members]].sum() / total),
+                bottom_adjusted=any(pc.adjusted for pc in members),
+                lines=[pc.line for pc in members],  # type: ignore[misc]
+                line_bottoms=[float(b) for b in bottoms],
+            )
+        )  # fmt: skip
+    groups.sort(key=lambda g: (g.area or "~", g.source, -g.length))
+    return groups, merged

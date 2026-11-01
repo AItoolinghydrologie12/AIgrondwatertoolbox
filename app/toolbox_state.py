@@ -57,9 +57,17 @@ class Grid:
     def watercourses(self) -> list[dict[str, Any]]:
         out = []
         for wc in ss[f"{KEY}_wcs"]:
-            cells, lengths = wc_geometry(wc, self.cell, self.nrow, self.ncol)
+            cells, lengths, offsets = wc_geometry(wc, self.cell, self.nrow, self.ncol)
             lines = absolute_lines(wc, self.ncol * self.cell, self.nrow * self.cell)
-            out.append({**wc, "cells": cells, "lengths": lengths, "lines": lines})
+            out.append(
+                {
+                    **wc,
+                    "cells": cells,
+                    "lengths": lengths,
+                    "bottom_offsets": offsets,
+                    "lines": lines,
+                }
+            )
         return out
 
     def groups(self, name: str) -> list[dict[str, Any]]:
@@ -127,7 +135,7 @@ def build_params(
         ),
         watercourses=tuple(
             p3.Watercourse(
-                cells=wc["cells"], lengths=wc["lengths"],
+                cells=wc["cells"], lengths=wc["lengths"], bottom_offsets=wc.get("bottom_offsets"),
                 **{f: wc[f] for f in ["name", "kind", *WC_FIELDS]},
             )
             for wc in wcs_view
