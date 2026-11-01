@@ -472,3 +472,35 @@ def test_grid_product_background_map(monkeypatch: pytest.MonkeyPatch) -> None:
     assert ("luchtfoto", (120000.0, 462500.0, 121000.0, 463500.0)) in seen
     assert at.session_state["p3_fig_draw"].layout.images[0].source.startswith("data:image/jpeg")
     assert any("Beeldmateriaal" in c.value for c in at.caption)
+
+
+def test_grid_product_top10nl_import(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Import with the service mocked by a saved response: one watercourse per width class,
+    lines in model metres, a reminder to fill in the levels; the model computes."""
+    import json
+
+    from gwproducten.geo import water
+
+    data = json.loads((Path(__file__).parent / "data" / "top10nl_waterdeel_lijn.json").read_text())
+    vlak = json.loads((Path(__file__).parent / "data" / "top10nl_waterdeel_vlak.json").read_text())
+    items = water.parse_waterdelen(data, False) + water.parse_waterdelen(vlak, True)
+    monkeypatch.setattr(water, "fetch_waterdelen", lambda bbox: items)
+    page = str(APP / "pages" / "1_Grondwatertoolbox.py")
+    at = AppTest.from_file(page, default_timeout=120).run()
+    at.toggle(key="p3_geo").set_value(True).run()
+    at.number_input(key="p3_cx").set_value(128000.0).run()
+    at.number_input(key="p3_cy").set_value(446000.0).run()
+    at.button(key="p3_clear").click().run()
+    at.button(key="p3_top10_get").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    at.button(key="p3_top10_add").click().run()
+    wcs = at.session_state["p3_wcs"]
+    assert [wc["width"] for wc in wcs] == [1.75, 4.5, 9.0]
+    assert all(wc["name"].endswith("(peil invullen)") for wc in wcs)
+    x, y = wcs[0]["lines"][0][0]
+    assert -1000.0 < x < 2000.0 and -1000.0 < y < 2000.0  # local metres, not RD
+    assert wcs[2]["points"] and not wcs[2]["lines"]  # the areas
+    assert any("peil invullen" in w.value for w in at.warning)
+    at.button(key="p3_calc").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert len(at.session_state["p3_result"]["params"].watercourses) == 3

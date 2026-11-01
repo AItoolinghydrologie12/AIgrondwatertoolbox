@@ -1,0 +1,675 @@
+{
+ "type": "FeatureCollection",
+ "timeStamp": "2026-11-01T08:19:00Z",
+ "links": [
+  {
+   "rel": "self",
+   "title": "This document as GeoJSON",
+   "type": "application/geo+json",
+   "href": "https://api.pdok.nl/kadaster/brt-top10nl/ogc/v1/collections/waterdeel_lijn/items?bbox=127500%2C445500%2C128500%2C446500&bbox-crs=http%3A%2F%2Fwww.opengis.net%2Fdef%2Fcrs%2FEPSG%2F0%2F28992&crs=http%3A%2F%2Fwww.opengis.net%2Fdef%2Fcrs%2FEPSG%2F0%2F28992&f=json&limit=1000"
+  },
+  {
+   "rel": "alternate",
+   "title": "This document as JSON-FG",
+   "type": "application/vnd.ogc.fg+json",
+   "href": "https://api.pdok.nl/kadaster/brt-top10nl/ogc/v1/collections/waterdeel_lijn/items?bbox=127500%2C445500%2C128500%2C446500&bbox-crs=http%3A%2F%2Fwww.opengis.net%2Fdef%2Fcrs%2FEPSG%2F0%2F28992&crs=http%3A%2F%2Fwww.opengis.net%2Fdef%2Fcrs%2FEPSG%2F0%2F28992&f=jsonfg&limit=1000"
+  },
+  {
+   "rel": "alternate",
+   "title": "This document as HTML",
+   "type": "text/html",
+   "href": "https://api.pdok.nl/kadaster/brt-top10nl/ogc/v1/collections/waterdeel_lijn/items?bbox=127500%2C445500%2C128500%2C446500&bbox-crs=http%3A%2F%2Fwww.opengis.net%2Fdef%2Fcrs%2FEPSG%2F0%2F28992&crs=http%3A%2F%2Fwww.opengis.net%2Fdef%2Fcrs%2FEPSG%2F0%2F28992&f=html&limit=1000"
+  }
+ ],
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "breedteklasse": "0,5 - 3 meter",
+    "bronactualiteit": "2010-01-01",
+    "bronbeschrijving": "Een orthogerectificeerde fotografische opname van een deel van het aardoppervlak. Gemaakt vanuit een vliegtuig.",
+    "bronnauwkeurigheid": 0.1,
+    "brontype": "luchtfoto",
+    "brugnaam": null,
+    "functie": "overig",
+    "fysiekvoorkomen": null,
+    "getijdeinvloed": "nee",
+    "hoofdafwatering": "nee",
+    "hoogteniveau": 0,
+    "isbagnaam": null,
+    "lokaal_id": "108637703",
+    "mutatietype": null,
+    "naamfries": null,
+    "naamnl": null,
+    "naamofficieel": null,
+    "namespace": "NL.TOP10NL",
+    "objectbegintijd": "2008-11-24",
+    "sluisnaam": null,
+    "tdncode": 601,
+    "tijdstipregistratie": "2012-02-06",
+    "typewater": "waterloop",
+    "vaarwegklasse": null,
+    "visualisatiecode": 12200,
+    "voorkomen": null
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      128222.30608801419,
+      446163.4943357551
+     ],
+     [
+      128179.57924142882,
+      446279.5066518825
+     ],
+     [
+      128092.01055732956,
+      446509.4262872227
+     ]
+    ]
+   },
+   "id": "1b5050e8-d47a-519e-b408-066d5c128b90"
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "breedteklasse": "0,5 - 3 meter",
+    "bronactualiteit": "2012-01-01",
+    "bronbeschrijving": "Een orthogerectificeerde fotografische opname van een deel van het aardoppervlak. Gemaakt vanuit een vliegtuig.",
+    "bronnauwkeurigheid": 0.1,
+    "brontype": "luchtfoto",
+    "brugnaam": null,
+    "functie": "overig",
+    "fysiekvoorkomen": null,
+    "getijdeinvloed": "nee",
+    "hoofdafwatering": "nee",
+    "hoogteniveau": 0,
+    "isbagnaam": null,
+    "lokaal_id": "126895336",
+    "mutatietype": null,
+    "naamfries": null,
+    "naamnl": null,
+    "naamofficieel": null,
+    "namespace": "NL.TOP10NL",
+    "objectbegintijd": "2014-01-24",
+    "sluisnaam": null,
+    "tdncode": 601,
+    "tijdstipregistratie": "2014-01-24",
+    "typewater": "waterloop",
+    "vaarwegklasse": null,
+    "visualisatiecode": 12200,
+    "voorkomen": null
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      127954.19480775062,
+      446369.62172346254
+     ],
+     [
+      128000.18763971714,
+      446249.8453873385
+     ]
+    ]
+   },
+   "id": "3121af0a-cdad-53c5-9b4e-65f20539d207"
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "breedteklasse": "0,5 - 3 meter",
+    "bronactualiteit": "2002-01-01",
+    "bronbeschrijving": "Digitaal bestand met gecodeerde vectoren. Deze geven tezamen de topografie van Nederland weer op de schaal 1:10.000. Voorloper van TOP10NL.",
+    "bronnauwkeurigheid": 2,
+    "brontype": "TOP10vector",
+    "brugnaam": null,
+    "functie": "overig",
+    "fysiekvoorkomen": null,
+    "getijdeinvloed": "nee",
+    "hoofdafwatering": "nee",
+    "hoogteniveau": 0,
+    "isbagnaam": null,
+    "lokaal_id": "108632109",
+    "mutatietype": null,
+    "naamfries": null,
+    "naamnl": null,
+    "naamofficieel": null,
+    "namespace": "NL.TOP10NL",
+    "objectbegintijd": "2008-11-24",
+    "sluisnaam": null,
+    "tdncode": 601,
+    "tijdstipregistratie": "2008-11-24",
+    "typewater": "waterloop",
+    "vaarwegklasse": null,
+    "visualisatiecode": 12200,
+    "voorkomen": null
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      128506.74448665859,
+      446080.8413567213
+     ],
+     [
+      128504.88249143797,
+      446084.96036728966
+     ],
+     [
+      128497.25551101097,
+      446101.8384106443
+     ],
+     [
+      128493.82251981832,
+      446109.43643019564
+     ]
+    ]
+   },
+   "id": "7fad4ba5-b60b-51a1-a5a6-a59664b90caa"
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "breedteklasse": "3 - 6 meter",
+    "bronactualiteit": "2012-01-01",
+    "bronbeschrijving": "Een orthogerectificeerde fotografische opname van een deel van het aardoppervlak. Gemaakt vanuit een vliegtuig.",
+    "bronnauwkeurigheid": 0.1,
+    "brontype": "luchtfoto",
+    "brugnaam": null,
+    "functie": "overig",
+    "fysiekvoorkomen": null,
+    "getijdeinvloed": "nee",
+    "hoofdafwatering": "nee",
+    "hoogteniveau": 0,
+    "isbagnaam": null,
+    "lokaal_id": "110488485",
+    "mutatietype": null,
+    "naamfries": null,
+    "naamnl": null,
+    "naamofficieel": null,
+    "namespace": "NL.TOP10NL",
+    "objectbegintijd": "2008-11-24",
+    "sluisnaam": null,
+    "tdncode": 602,
+    "tijdstipregistratie": "2014-03-29",
+    "typewater": "waterloop",
+    "vaarwegklasse": null,
+    "visualisatiecode": 12300,
+    "voorkomen": null
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      128098.49614403267,
+      445704.9347819363
+     ],
+     [
+      127985.29537451747,
+      445689.23559606884
+     ],
+     [
+      127881.56257800365,
+      445672.95541643567
+     ],
+     [
+      127798.76273679933,
+      445658.068265241
+     ],
+     [
+      127750.39582525902,
+      445646.7951673038
+     ],
+     [
+      127738.8568463137,
+      445644.106143869
+     ],
+     [
+      127736.89584988986,
+      445643.6491398811
+     ],
+     [
+      127686.65593855912,
+      445630.15803117084
+     ],
+     [
+      127665.3369742721,
+      445623.2849807762
+     ]
+    ]
+   },
+   "id": "4d89e0f1-f9e7-5548-8fd8-48dcd51c4817"
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "breedteklasse": "0,5 - 3 meter",
+    "bronactualiteit": "2002-01-01",
+    "bronbeschrijving": "Digitaal bestand met gecodeerde vectoren. Deze geven tezamen de topografie van Nederland weer op de schaal 1:10.000. Voorloper van TOP10NL.",
+    "bronnauwkeurigheid": 2,
+    "brontype": "TOP10vector",
+    "brugnaam": null,
+    "functie": "overig",
+    "fysiekvoorkomen": null,
+    "getijdeinvloed": "nee",
+    "hoofdafwatering": "nee",
+    "hoogteniveau": 0,
+    "isbagnaam": null,
+    "lokaal_id": "108623850",
+    "mutatietype": null,
+    "naamfries": null,
+    "naamnl": null,
+    "naamofficieel": null,
+    "namespace": "NL.TOP10NL",
+    "objectbegintijd": "2008-11-24",
+    "sluisnaam": null,
+    "tdncode": 601,
+    "tijdstipregistratie": "2008-11-24",
+    "typewater": "waterloop",
+    "vaarwegklasse": null,
+    "visualisatiecode": 12200,
+    "voorkomen": null
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      127657.39131927259,
+      446059.7064281058
+     ],
+     [
+      127791.81482083387,
+      445705.9114237664
+     ]
+    ]
+   },
+   "id": "c623e945-ade0-5465-a02f-5a8760a2b123"
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "breedteklasse": "3 - 6 meter",
+    "bronactualiteit": "2006-01-01",
+    "bronbeschrijving": "Een orthogerectificeerde fotografische opname van een deel van het aardoppervlak. Gemaakt vanuit een vliegtuig.",
+    "bronnauwkeurigheid": 0.4,
+    "brontype": "luchtfoto",
+    "brugnaam": null,
+    "functie": "overig",
+    "fysiekvoorkomen": null,
+    "getijdeinvloed": "nee",
+    "hoofdafwatering": "nee",
+    "hoogteniveau": 0,
+    "isbagnaam": null,
+    "lokaal_id": "110488497",
+    "mutatietype": null,
+    "naamfries": null,
+    "naamnl": null,
+    "naamofficieel": null,
+    "namespace": "NL.TOP10NL",
+    "objectbegintijd": "2008-11-24",
+    "sluisnaam": null,
+    "tdncode": 602,
+    "tijdstipregistratie": "2008-11-24",
+    "typewater": "waterloop",
+    "vaarwegklasse": null,
+    "visualisatiecode": 12300,
+    "voorkomen": null
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      127996.9963213755,
+      445670.3875451967
+     ],
+     [
+      127960.73439295606,
+      445665.04548357596
+     ],
+     [
+      127917.65747612166,
+      445657.5444061317
+     ]
+    ]
+   },
+   "id": "8470fd82-fa51-5c61-a205-dfd1cff1dbad"
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "breedteklasse": "0,5 - 3 meter",
+    "bronactualiteit": "2002-01-01",
+    "bronbeschrijving": "Digitaal bestand met gecodeerde vectoren. Deze geven tezamen de topografie van Nederland weer op de schaal 1:10.000. Voorloper van TOP10NL.",
+    "bronnauwkeurigheid": 2,
+    "brontype": "TOP10vector",
+    "brugnaam": null,
+    "functie": "overig",
+    "fysiekvoorkomen": null,
+    "getijdeinvloed": "nee",
+    "hoofdafwatering": "nee",
+    "hoogteniveau": 0,
+    "isbagnaam": null,
+    "lokaal_id": "108621960",
+    "mutatietype": null,
+    "naamfries": null,
+    "naamnl": null,
+    "naamofficieel": null,
+    "namespace": "NL.TOP10NL",
+    "objectbegintijd": "2008-11-24",
+    "sluisnaam": null,
+    "tdncode": 601,
+    "tijdstipregistratie": "2008-11-24",
+    "typewater": "waterloop",
+    "vaarwegklasse": null,
+    "visualisatiecode": 12200,
+    "voorkomen": null
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      128434.66968385529,
+      446268.7928551137
+     ],
+     [
+      128484.37961457613,
+      446288.9099560607
+     ]
+    ]
+   },
+   "id": "93ffe260-1c30-54d0-9fdd-e967dc03d9f8"
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "breedteklasse": "0,5 - 3 meter",
+    "bronactualiteit": "2006-01-01",
+    "bronbeschrijving": "Een orthogerectificeerde fotografische opname van een deel van het aardoppervlak. Gemaakt vanuit een vliegtuig.",
+    "bronnauwkeurigheid": 0.4,
+    "brontype": "luchtfoto",
+    "brugnaam": null,
+    "functie": "overig",
+    "fysiekvoorkomen": null,
+    "getijdeinvloed": "nee",
+    "hoofdafwatering": "nee",
+    "hoogteniveau": 0,
+    "isbagnaam": null,
+    "lokaal_id": "110488265",
+    "mutatietype": null,
+    "naamfries": null,
+    "naamnl": null,
+    "naamofficieel": null,
+    "namespace": "NL.TOP10NL",
+    "objectbegintijd": "2008-11-24",
+    "sluisnaam": null,
+    "tdncode": 601,
+    "tijdstipregistratie": "2014-01-24",
+    "typewater": "waterloop",
+    "vaarwegklasse": null,
+    "visualisatiecode": 12200,
+    "voorkomen": null
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      128336.85363693346,
+      445746.02918487106
+     ],
+     [
+      128340.77762856567,
+      445746.72719149163
+     ],
+     [
+      128354.48859931962,
+      445749.1652145974
+     ],
+     [
+      128360.77058601961,
+      445750.51322586724
+     ],
+     [
+      128369.33356723734,
+      445750.9032368546
+     ],
+     [
+      128378.67154604336,
+      445749.736244039
+     ],
+     [
+      128388.78852540758,
+      445746.6212455953
+     ],
+     [
+      128395.26551466942,
+      445745.66824930836
+     ],
+     [
+      128402.02050347014,
+      445744.67525318684
+     ],
+     [
+      128411.74948780063,
+      445744.286261903
+     ],
+     [
+      128419.53247574774,
+      445745.063272137
+     ],
+     [
+      128424.20246917245,
+      445747.01028270915
+     ],
+     [
+      128434.03745717791,
+      445755.28031742695
+     ]
+    ]
+   },
+   "id": "4a3a232b-faa6-5d24-85dc-c402ec2f4eee"
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "breedteklasse": "0,5 - 3 meter",
+    "bronactualiteit": "2002-01-01",
+    "bronbeschrijving": "Digitaal bestand met gecodeerde vectoren. Deze geven tezamen de topografie van Nederland weer op de schaal 1:10.000. Voorloper van TOP10NL.",
+    "bronnauwkeurigheid": 2,
+    "brontype": "TOP10vector",
+    "brugnaam": null,
+    "functie": "overig",
+    "fysiekvoorkomen": null,
+    "getijdeinvloed": "nee",
+    "hoofdafwatering": "nee",
+    "hoogteniveau": 0,
+    "isbagnaam": null,
+    "lokaal_id": "108623810",
+    "mutatietype": null,
+    "naamfries": null,
+    "naamnl": null,
+    "naamofficieel": null,
+    "namespace": "NL.TOP10NL",
+    "objectbegintijd": "2008-11-24",
+    "sluisnaam": null,
+    "tdncode": 601,
+    "tijdstipregistratie": "2008-11-24",
+    "typewater": "waterloop",
+    "vaarwegklasse": null,
+    "visualisatiecode": 12200,
+    "voorkomen": null
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      128493.82251981832,
+      446109.43643019564
+     ],
+     [
+      128472.15757946346,
+      446166.6325815492
+     ],
+     [
+      128434.66968385529,
+      446268.7928551137
+     ]
+    ]
+   },
+   "id": "92b771bc-71cf-543c-89ad-cbe3f95e7da3"
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "breedteklasse": "0,5 - 3 meter",
+    "bronactualiteit": "2019-01-01",
+    "bronbeschrijving": "Geometrie ingetekend door Kadaster, op basis van luchtfoto's. Voor de objectklasse terrein is het type_landgebruik ook gebaseerd op BRP-Gewaspercelen 2019, bron: RVO.nl",
+    "bronnauwkeurigheid": 0.1,
+    "brontype": "luchtfoto",
+    "brugnaam": null,
+    "functie": "overig",
+    "fysiekvoorkomen": null,
+    "getijdeinvloed": "nee",
+    "hoofdafwatering": "nee",
+    "hoogteniveau": 0,
+    "isbagnaam": null,
+    "lokaal_id": "108637269",
+    "mutatietype": "werkelijke verandering",
+    "naamfries": null,
+    "naamnl": null,
+    "naamofficieel": null,
+    "namespace": "NL.TOP10NL",
+    "objectbegintijd": "2008-11-24",
+    "sluisnaam": null,
+    "tdncode": 601,
+    "tijdstipregistratie": "2025-06-01",
+    "typewater": "waterloop",
+    "vaarwegklasse": null,
+    "visualisatiecode": 12200,
+    "voorkomen": null
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      127687.3145155585,
+      445680.7697115934
+     ],
+     [
+      127666.36467693749,
+      445735.7709356252
+     ],
+     [
+      127648.4871183197,
+      445782.7060690981
+     ],
+     [
+      127562.29550494724,
+      446008.9911591837
+     ]
+    ]
+   },
+   "id": "50ae3dfb-1a24-5b03-a0bc-a3f88a786326"
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "breedteklasse": "0,5 - 3 meter",
+    "bronactualiteit": "2002-01-01",
+    "bronbeschrijving": "Digitaal bestand met gecodeerde vectoren. Deze geven tezamen de topografie van Nederland weer op de schaal 1:10.000. Voorloper van TOP10NL.",
+    "bronnauwkeurigheid": 2,
+    "brontype": "TOP10vector",
+    "brugnaam": null,
+    "functie": "overig",
+    "fysiekvoorkomen": null,
+    "getijdeinvloed": "nee",
+    "hoofdafwatering": "nee",
+    "hoogteniveau": 0,
+    "isbagnaam": null,
+    "lokaal_id": "108634365",
+    "mutatietype": null,
+    "naamfries": null,
+    "naamnl": null,
+    "naamofficieel": null,
+    "namespace": "NL.TOP10NL",
+    "objectbegintijd": "2008-11-24",
+    "sluisnaam": null,
+    "tdncode": 601,
+    "tijdstipregistratie": "2008-11-24",
+    "typewater": "waterloop",
+    "vaarwegklasse": null,
+    "visualisatiecode": 12200,
+    "voorkomen": null
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      128490.28644975706,
+      445939.5979220901
+     ],
+     [
+      128487.20444960464,
+      445928.2848855396
+     ],
+     [
+      128475.15545583624,
+      445899.3447879331
+     ],
+     [
+      128468.21946142158,
+      445887.15274495183
+     ]
+    ]
+   },
+   "id": "1a5f83ad-3d7a-5891-baaa-2c05ac9fe721"
+  },
+  {
+   "type": "Feature",
+   "properties": {
+    "breedteklasse": "0,5 - 3 meter",
+    "bronactualiteit": "2002-01-01",
+    "bronbeschrijving": "Digitaal bestand met gecodeerde vectoren. Deze geven tezamen de topografie van Nederland weer op de schaal 1:10.000. Voorloper van TOP10NL.",
+    "bronnauwkeurigheid": 2,
+    "brontype": "TOP10vector",
+    "brugnaam": null,
+    "functie": "overig",
+    "fysiekvoorkomen": null,
+    "getijdeinvloed": "nee",
+    "hoofdafwatering": "nee",
+    "hoogteniveau": 0,
+    "isbagnaam": null,
+    "lokaal_id": "108621958",
+    "mutatietype": null,
+    "naamfries": null,
+    "naamnl": null,
+    "naamofficieel": null,
+    "namespace": "NL.TOP10NL",
+    "objectbegintijd": "2008-11-24",
+    "sluisnaam": null,
+    "tdncode": 601,
+    "tijdstipregistratie": "2008-11-24",
+    "typewater": "waterloop",
+    "vaarwegklasse": null,
+    "visualisatiecode": 12200,
+    "voorkomen": null
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      128568.62546506655,
+      446250.94691298273
+     ],
+     [
+      128492.72167466671,
+      446453.47845239117
+     ]
+    ]
+   },
+   "id": "d953c337-0fde-5f4f-ada8-014413bb3175"
+  }
+ ],
+ "numberReturned": 119
+}
