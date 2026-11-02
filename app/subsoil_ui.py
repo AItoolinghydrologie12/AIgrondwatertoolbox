@@ -7,7 +7,7 @@ from typing import Any
 
 import streamlit as st
 from draw_actions import new_zone
-from toolbox_state import DEFAULTS, KEY, bump, ss
+from toolbox_state import DEFAULTS, KEY, bump, clear_undo, ss
 from ui_common import number, stack_inputs, zone_stack_inputs
 
 from gwproducten.core.layers import SPLIT_RESISTANCE, SPLIT_THICKNESS, LayerStack, split_aquifer
@@ -57,6 +57,7 @@ def zone_inputs(base: LayerStack) -> dict[int, tuple[LayerStack, float]]:
         help=f"Maximaal {p3.MAX_ZONES} zones.",
     ):  # fmt: skip
         new_zone(ss, KEY)
+        bump()
         st.rerun()
     return out
 
@@ -76,7 +77,7 @@ def write_stack(state: Any, prefix: str, stack: LayerStack) -> None:
 
 def apply_split(state: Any, split: dict[str, Any]) -> None:
     """Apply a split (prepared by :func:`_split_inputs`) before the widgets exist: the new
-    layer values of the base and the zones, and the layers of wells, GHB groups, walls and
+    layer values of the base and the zones, and the layers of wells, GHB/CHD groups, walls and
     the boundary per layer shifted one node down below the split."""
     old_keys, new_keys, node = split["old_keys"], split["new_keys"], split["node"]
     remap = {k: new_keys[j + (j > node)] for j, k in enumerate(old_keys)}
@@ -86,7 +87,7 @@ def apply_split(state: Any, split: dict[str, Any]) -> None:
     write_stack(state, f"{KEY}_{mode}", base)
     for zid, zstack in split["zones"].items():
         write_stack(state, f"{KEY}_z{zid}_{mode}_{n}", zstack)
-    for name in ("wells", "ghb", "walls"):
+    for name in ("wells", "ghb", "chd", "walls"):
         for g in state.get(f"{KEY}_{name}", []):
             g["layer"] = remap.get(g["layer"], g["layer"])
     for j in range(len(old_keys) - 1, -1, -1):  # bottom up: no value is overwritten too early
@@ -254,6 +255,7 @@ def subsoil_step(
     if pending is not None:  # prepared in the previous run, applied before the widgets exist
         apply_split(ss, pending)
         bump()
+        clear_undo()  # the old drawings refer to the layers before the split
     col_in, col_fig = st.columns([2, 3], gap="large")
     with col_in:
         st.subheader("Lagenopbouw")

@@ -17,7 +17,7 @@ from location_ui import location_inputs
 from project_io import apply_project, parse_project, to_json
 from result_ui import result_tabs
 from subsoil_ui import subsoil_step
-from toolbox_state import DEFAULTS, KEY, Grid, build_params, reset, ss
+from toolbox_state import DEFAULTS, KEY, Grid, build_params, checkpoint, clear_undo, reset, ss
 from ui_common import number, page_header, show_param_error
 
 from gwproducten.core.params import ParamError, meta
@@ -29,13 +29,15 @@ page_header(p3.META)
 
 if f"{KEY}_wcs" not in ss:
     reset([])  # start empty; "Voorbeeld laden" gives the two example watercourses
-ss.setdefault(f"{KEY}_zones", [])
-ss.setdefault(f"{KEY}_walls", [])
+for _name in ("zones", "walls", "wells", "ghb", "chd"):  # also sessions from older versions
+    ss.setdefault(f"{KEY}_{_name}", [])
 _pending = ss.pop(f"{KEY}_pending_project", None)
 if _pending is not None:  # loaded in the previous run, applied before the widgets exist
     apply_project(ss, KEY, _pending)
     ss.pop(f"{KEY}_result", None)
     ss[f"{KEY}_ver"] = ss.get(f"{KEY}_ver", 0) + 1
+    clear_undo()
+checkpoint()  # the drawing before any change in this run ("Ongedaan maken")
 
 
 def size_input(name: str, key: str, size_max: float) -> float:
@@ -64,7 +66,10 @@ with st.sidebar.expander("Model en rand", expanded=True):
         values[name] = size_input(name, f"{KEY}_{k}", size_max)
     st.caption(
         f"Maximaal {p3.MAX_CELLS_PER_SIDE} × {p3.MAX_CELLS_PER_SIDE} cellen: bij "
-        f"{values['cell']:g} m is het model hooguit {size_max:g} m breed en hoog."
+        f"{values['cell']:g} m is het model hooguit {size_max:g} m breed en hoog. Bij veel "
+        "lagen minder: "
+        + ", ".join(f"{n} rekenlagen {m} × {m}" for n, m in p3.MAX_CELLS_BY_NODES.items())
+        + "."
     )
     st.caption("De modelrand en kwel stel je in bij stap 1.")
 project_box = st.sidebar.expander("Project opslaan of laden", expanded=False)
@@ -100,8 +105,14 @@ with step1:
 
 cell = float(values["cell"])
 grid = Grid(cell, int(round(values["size_y"] / cell)), int(round(values["size_x"] / cell)))
-if f"{KEY}_wells" not in ss:
-    ss[f"{KEY}_wells"], ss[f"{KEY}_ghb"] = [], []
+max_cells = p3.max_cells_per_side(len(stack.nodes)) if not stack.errors() else grid.nrow
+if max(grid.nrow, grid.ncol) > max_cells:
+    with step1:
+        st.warning(
+            f"Met {len(stack.nodes)} rekenlagen kan het model maximaal {max_cells} × {max_cells} "
+            f"cellen hebben (nu {grid.ncol} × {grid.nrow}), om de rekentijd en het geheugen "
+            "binnen de perken te houden. Kies grotere cellen of een kleiner model (zijbalk)."
+        )
 node_labels = {n.key: n.label for n in stack.nodes} if not stack.errors() else {}
 
 try:

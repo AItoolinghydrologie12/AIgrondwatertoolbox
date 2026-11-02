@@ -33,6 +33,15 @@ THICK = LayerStack(
     "freatisch_zand",
     build_layers("freatisch_zand", [(10.0, 10.0), (20.0, 15.0)], [(2.0, 200.0, 0.01)]),
 )
+SIX_AQ = LayerStack(
+    "deklaag",
+    build_layers(
+        "deklaag",
+        [(20.0, 15.0), (15.0, 20.0), (30.0, 25.0), (20.0, 10.0), (25.0, 30.0), (40.0, 20.0)],
+        [(3.0, 300.0, 0.05), (3.0, 800.0, 0.01), (5.0, 2000.0, 0.01), (4.0, 5000.0, 0.01),
+         (5.0, 3000.0, 0.01), (6.0, 10000.0, 0.01)],
+    ),
+)  # fmt: skip
 
 CASES = {
     "standaard, vaste T": p3.Params(convertible=False),
@@ -70,6 +79,10 @@ CASES = {
         walls=(p3.Wall("bouwput", outline_faces({(r, c) for r in range(19, 23)
                                                  for c in range(19, 23)}, 40, 40), "pakket1",
                        20.0),),
+    ),
+    "6 pakketten, put in pakket 6, kwel": p3.Params(
+        stack=SIX_AQ, seepage=True,
+        wells=(p3.WellGroup("bem", ((20, 20),), "pakket6", 0.0, 800.0),),
     ),
     "bodem per cel (legger), deklaag": p3.Params(
         stack=CLAY,

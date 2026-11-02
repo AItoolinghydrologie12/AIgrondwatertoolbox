@@ -16,7 +16,9 @@ def centres(*cells: tuple[int, int]) -> set[tuple[float, float]]:
 
 
 def empty_state() -> dict:
-    return {f"{KEY}_{k}": [] for k in ("wcs", "wells", "ghb", "zones")} | {f"{KEY}_drain": set()}
+    return {f"{KEY}_{k}": [] for k in ("wcs", "wells", "ghb", "chd", "zones")} | {
+        f"{KEY}_drain": set()
+    }
 
 
 def test_watercourse_new_add_and_remove_cells() -> None:
@@ -30,16 +32,26 @@ def test_watercourse_new_add_and_remove_cells() -> None:
     assert st["p3_wcs"] == []  # no cells left: watercourse removed
 
 
-def test_drain_wells_ghb_add_and_remove() -> None:
+def test_drain_wells_ghb_chd_add_and_remove() -> None:
     st = empty_state()
     apply_selection(st, KEY, GRID, "drain", "toevoegen", None, {}, centres((0, 0), (0, 1)))
     apply_selection(st, KEY, GRID, "drain", "verwijderen", None, {}, centres((0, 0)))
     assert st["p3_drain"] == centres((0, 1))
-    for obj, name in (("put", "wells"), ("ghb", "ghb")):
+    for obj, name in (("put", "wells"), ("ghb", "ghb"), ("chd", "chd")):
         apply_selection(st, KEY, GRID, obj, "toevoegen", None, {"name": "g"}, centres((5, 5)))
         assert len(st[f"p3_{name}"]) == 1
         apply_selection(st, KEY, GRID, obj, "verwijderen", None, {}, centres((5, 5)))
         assert st[f"p3_{name}"] == []
+
+
+def test_well_click_adds_to_chosen_group() -> None:
+    """A click with a group chosen adds the well to that group; with NEW it makes a group."""
+    st = empty_state()
+    props = {"name": "Bemaling", "q_new": 100.0}
+    apply_selection(st, KEY, GRID, "put", "toevoegen", NEW, props, centres((5, 5)))
+    apply_selection(st, KEY, GRID, "put", "toevoegen", "Bemaling", {}, centres((5, 6)))
+    assert [g["name"] for g in st["p3_wells"]] == ["Bemaling"]
+    assert st["p3_wells"][0]["points"] == centres((5, 5), (5, 6))
 
 
 def test_zone_new_moves_cells_and_remove() -> None:

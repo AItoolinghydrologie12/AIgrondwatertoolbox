@@ -17,6 +17,8 @@ from gwproducten.geo import regis
 from gwproducten.geo.pdok import ServiceError
 from gwproducten.products import peilopzet_grid as p3
 
+REGIS_DEFAULT_AQUIFERS = 4  # default of the proposal; up to MAX_AQUIFERS on request
+
 
 @st.cache_data(
     ttl=7 * 24 * 3600, max_entries=50, show_spinner="Ondergrond ophalen bij TNO (REGIS)…"
@@ -96,8 +98,10 @@ def regis_inputs(values: dict[str, Any]) -> None:
         help="Een kleilaag met een kleinere weerstand telt mee in het pakket eromheen.",
     )  # fmt: skip
     n_max = c2.number_input(
-        "Maximaal aantal pakketten", 1, p3.MAX_AQUIFERS, p3.MAX_AQUIFERS, key=f"{KEY}_rg_nmax",
-        help="Daaronder rekent de app met een dichte basis.",
+        "Maximaal aantal pakketten", 1, p3.MAX_AQUIFERS, REGIS_DEFAULT_AQUIFERS,
+        key=f"{KEY}_rg_nmax",
+        help="Daaronder rekent de app met een dichte basis. Meer dan 5 rekenlagen maakt het "
+        "grootste rooster kleiner (zie de zijbalk).",
     )  # fmt: skip
     if c3.button("Ondergrond ophalen", key=f"{KEY}_rg_get", icon=":material/layers:"):
         try:

@@ -3,11 +3,13 @@ drawn objects on the current grid."""
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from typing import Any
 
 import streamlit as st
 from grid_ui import absolute_lines, to_cells, wall_faces, wc_geometry
+from streamlit.errors import StreamlitAPIException
 
 from gwproducten.core.layers import LayerStack
 from gwproducten.products import peilopzet_grid as p3
@@ -19,6 +21,8 @@ WC_FIELDS = [
     "stage_ref", "stage_new", "bottom", "width", "length", "entry_resistance", "conductance",
 ]  # fmt: skip
 MAP_CONFIG = {"scrollZoom": True, "displaylogo": False}
+DRAWN = ("wcs", "drain", "wells", "ghb", "chd", "walls", "zones")  # what "Ongedaan maken" restores
+MAX_UNDO = 10
 
 ss = st.session_state
 
@@ -36,14 +40,66 @@ def example() -> list[dict[str, Any]]:
 
 
 def reset(wcs: list[dict[str, Any]]) -> None:
+    if f"{KEY}_checkpoint" in ss:  # not at the first start
+        _push_undo()
     ss[f"{KEY}_wcs"], ss[f"{KEY}_drain"], ss[f"{KEY}_line"] = wcs, set(), []
-    ss[f"{KEY}_wells"], ss[f"{KEY}_ghb"], ss[f"{KEY}_zones"] = [], [], []
+    ss[f"{KEY}_wells"], ss[f"{KEY}_ghb"], ss[f"{KEY}_chd"] = [], [], []
+    ss[f"{KEY}_zones"] = []
     ss[f"{KEY}_walls"] = []
     ss[f"{KEY}_ver"] = ss.get(f"{KEY}_ver", 0) + 1
 
 
 def bump() -> None:
-    ss[f"{KEY}_ver"] += 1  # new widget keys clear the map selection and tables
+    """After a change of the drawing: it can be undone; new widget keys clear the map
+    selection and the tables."""
+    _push_undo()
+    ss[f"{KEY}_ver"] += 1
+
+
+def checkpoint() -> None:
+    """At the start of every page run: a copy of the drawing, the undo point of a change made
+    in this run (the drawing panel reruns on its own only for the line in progress)."""
+    ss[f"{KEY}_checkpoint"] = copy.deepcopy(
+        {k: ss[f"{KEY}_{k}"] for k in DRAWN if f"{KEY}_{k}" in ss}
+    )
+
+
+def _push_undo() -> None:
+    stack = ss.setdefault(f"{KEY}_undo_stack", [])
+    point = ss.get(f"{KEY}_checkpoint")
+    if point is not None and (not stack or stack[-1] is not point):  # once per run
+        stack.append(point)
+        del stack[:-MAX_UNDO]
+
+
+def can_undo() -> bool:
+    return bool(ss.get(f"{KEY}_undo_stack"))
+
+
+def undo() -> None:
+    """Restore the drawing from before the last change."""
+    stack = ss.get(f"{KEY}_undo_stack", [])
+    if not stack:
+        return
+    for k, value in copy.deepcopy(stack.pop()).items():
+        ss[f"{KEY}_{k}"] = value
+    ss[f"{KEY}_line"] = []
+    ss[f"{KEY}_ver"] += 1
+
+
+def clear_undo() -> None:
+    """After a change of the layers (split) or loading a project the old drawings no longer
+    fit: forget them."""
+    ss[f"{KEY}_undo_stack"] = []
+
+
+def rerun_fragment() -> None:
+    """Rerun only the current fragment (drawing panel, result panel); Streamlit refuses that
+    during a full-page run (e.g. in tests), and then the whole page reruns."""
+    try:
+        st.rerun(scope="fragment")
+    except StreamlitAPIException:
+        st.rerun()
 
 
 @dataclass(frozen=True)
@@ -71,7 +127,7 @@ class Grid:
         return out
 
     def groups(self, name: str) -> list[dict[str, Any]]:
-        """Well or GHB groups with their cells on the current grid."""
+        """Well, GHB or CHD groups with their cells on the current grid."""
         return [
             {**g, "cells": to_cells(g["points"], self.cell, self.nrow, self.ncol)}
             for g in ss[f"{KEY}_{name}"]
@@ -123,6 +179,10 @@ def build_params(
                 g["name"], g["cells"], g["layer"], g["head_ref"], g["head_new"], g["resistance"]
             )
             for g in grid.groups("ghb")
+        ),
+        chd=tuple(
+            p3.ChdGroup(g["name"], g["cells"], g["layer"], g["head_ref"], g["head_new"])
+            for g in grid.groups("chd")
         ),
         walls=tuple(
             p3.Wall(

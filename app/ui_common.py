@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Any
 
 import pandas as pd
@@ -186,12 +187,20 @@ def dict_table(
     return pd.DataFrame({"Grootheid": list(d), value_label: [fmt.format(v) for v in d.values()]})
 
 
-def csv_button(df: pd.DataFrame, filename: str, label: str) -> None:
+def csv_bytes(df: pd.DataFrame) -> bytes:
+    return df.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig")
+
+
+def csv_button(df: pd.DataFrame | Callable[[], pd.DataFrame], filename: str, label: str) -> None:
+    """Download button whose CSV is only made on a click (Streamlit's deferred download):
+    writing the full grid as text on every rerun took most of the page time. ``df`` may be
+    a function that builds the table."""
     st.download_button(
         label,
-        df.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig"),
+        lambda: csv_bytes(df() if callable(df) else df),
         file_name=filename,
         mime="text/csv",
+        on_click="ignore",
     )
 
 

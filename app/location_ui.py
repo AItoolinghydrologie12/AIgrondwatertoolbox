@@ -1,6 +1,6 @@
-"""Model location in RD coordinates (optional): address search with the PDOK Locatieserver and
-the centre of the model. The location is used for map data and the MODFLOW 6 export; the
-calculation itself stays in local metres."""
+"""Model location in RD coordinates (optional): address search with the PDOK Locatieserver, a
+map to click the centre of the model on, and the centre in RD. The location is used for map
+data and the MODFLOW 6 export; the calculation itself stays in local metres."""
 
 from __future__ import annotations
 
@@ -9,16 +9,22 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 from grid_ui import to_cells
 from regis_ui import regis_inputs
-from toolbox_state import KEY, ss
+from toolbox_state import KEY, MAP_CONFIG, ss
 
 from gwproducten.core.params import meta
 from gwproducten.geo import ahn, pdok
 from gwproducten.products import peilopzet_grid as p3
 
 DEFAULT_CENTRE = (155000.0, 463000.0)  # Amersfoort, origin of the RD system
+RD_X, RD_Y = (0.0, 300000.0), (300000.0, 625000.0)  # range of the centre inputs [m]
+LOCMAP_KINDS = {"top10nl": "topografie", "luchtfoto": "luchtfoto"}
+LOCMAP_WIDTHS = {"0,5 km": 500.0, "2 km": 2000.0, "10 km": 10000.0}
+LOCMAP_CLICKS = 80  # click points per side of the location map
+FRAME_COLOR = "#d62828"
 
 
 @st.cache_data(ttl=24 * 3600, max_entries=100, show_spinner="Zoeken bij PDOK…")
@@ -62,14 +68,18 @@ def location_inputs(values: dict[str, Any]) -> None:
             )  # fmt: skip
             if c2.button("Model hier centreren", key=f"{KEY}_loc_use", width="stretch"):
                 ss[f"{KEY}_cx"], ss[f"{KEY}_cy"] = round(hits[pick].x), round(hits[pick].y)
+        clicked = ss.pop(f"{KEY}_loc_next", None)  # a click on the map in the previous run
+        if clicked is not None:  # within the range of the inputs below
+            ss[f"{KEY}_cx"] = min(max(clicked[0], RD_X[0]), RD_X[1])
+            ss[f"{KEY}_cy"] = min(max(clicked[1], RD_Y[0]), RD_Y[1])
         ss.setdefault(f"{KEY}_cx", DEFAULT_CENTRE[0])
         ss.setdefault(f"{KEY}_cy", DEFAULT_CENTRE[1])
         c1, c2 = st.columns(2)
         cx = c1.number_input(
-            "RD x middelpunt model [m]", 0.0, 300000.0, step=10.0, format="%.0f", key=f"{KEY}_cx"
+            "RD x middelpunt model [m]", *RD_X, step=10.0, format="%.0f", key=f"{KEY}_cx"
         )
         cy = c2.number_input(
-            "RD y middelpunt model [m]", 300000.0, 625000.0, step=10.0, format="%.0f",
+            "RD y middelpunt model [m]", *RD_Y, step=10.0, format="%.0f",
             key=f"{KEY}_cy",
         )  # fmt: skip
         x0 = max(cx - values["size_x"] / 2.0, 0.0)
@@ -80,10 +90,89 @@ def location_inputs(values: dict[str, Any]) -> None:
             f"({x0 + values['size_x']:.0f}; {y0 + values['size_y']:.0f}) m. Adreszoeker: "
             "PDOK Locatieserver."
         )
+        location_map(values, cx, cy)
         st.divider()
         ahn_inputs(values)
         st.divider()
         regis_inputs(values)
+
+
+def location_map(values: dict[str, Any], cx: float, cy: float) -> None:
+    """Map around the model centre (PDOK background) with the model area; a click moves the
+    centre there. The map follows the centre in steps of a tenth of its width, so small moves
+    keep the same (cached) image."""
+    c1, c2 = st.columns(2)
+    kind = c1.segmented_control(
+        "Kaart", list(LOCMAP_KINDS), format_func=LOCMAP_KINDS.get, default="top10nl",
+        required=True, key=f"{KEY}_locmap_bg",
+    )  # fmt: skip
+    width_label = c2.segmented_control(
+        "Kaartbreedte", list(LOCMAP_WIDTHS), default="2 km", required=True,
+        key=f"{KEY}_locmap_w",
+    )  # fmt: skip
+    size = LOCMAP_WIDTHS[width_label]
+    step = size / 10.0
+    mx, my = round(cx / step) * step, round(cy / step) * step
+    bbox = (mx - size / 2, my - size / 2, mx + size / 2, my + size / 2)
+    fig = go.Figure()
+    try:
+        fig.add_layout_image(
+            source=_background_uri(kind, bbox), xref="x", yref="y", x=bbox[0], y=bbox[3],
+            sizex=size, sizey=size, sizing="stretch", layer="below",
+        )  # fmt: skip
+    except pdok.ServiceError as err:
+        st.warning(f"{err} Vul het middelpunt dan in RD in.")
+    x0, y0 = values["origin_x"], values["origin_y"]
+    x1, y1 = x0 + values["size_x"], y0 + values["size_y"]
+    fig.add_trace(
+        go.Scatter(
+            x=[x0, x1, x1, x0, x0], y=[y0, y0, y1, y1, y0], mode="lines", name="modelgebied",
+            line={"color": FRAME_COLOR, "width": 3}, hoverinfo="skip",
+        )
+    )  # fmt: skip
+    fig.add_trace(
+        go.Scatter(
+            x=[cx], y=[cy], mode="markers", name="middelpunt", hoverinfo="skip",
+            marker={"symbol": "cross-thin", "size": 16, "line": {"width": 3, "color": FRAME_COLOR}},
+        )
+    )  # fmt: skip
+    edge = size / LOCMAP_CLICKS
+    grid = np.linspace(-size / 2 + edge / 2, size / 2 - edge / 2, LOCMAP_CLICKS)
+    gx, gy = np.meshgrid(mx + grid, my + grid)
+    fig.add_trace(  # last trace: the click target
+        go.Scatter(
+            x=gx.ravel(), y=gy.ravel(), mode="markers", marker={"size": 8, "opacity": 0},
+            hovertemplate="RD %{x:.0f}; %{y:.0f}<extra>klik = middelpunt</extra>",
+            showlegend=False,
+        )
+    )  # fmt: skip
+    fig.update_layout(
+        height=420, margin={"t": 10, "b": 10, "l": 10, "r": 10}, dragmode="pan",
+        clickmode="event+select", hoverdistance=50, uirevision=str(bbox),
+        xaxis={"range": [bbox[0], bbox[2]], "showgrid": False, "tickformat": ".0f"},
+        yaxis={"range": [bbox[1], bbox[3]], "showgrid": False, "tickformat": ".0f",
+               "scaleanchor": "x"},
+        legend={"orientation": "h", "y": -0.05, "yanchor": "top"},
+    )  # fmt: skip
+    event = st.plotly_chart(
+        fig, key=f"{KEY}_locmap_{width_label}", on_select="rerun", selection_mode=("points",),
+        config=MAP_CONFIG, width="stretch",
+    )  # fmt: skip
+    target = len(fig.data) - 1
+    picked = [
+        (round(float(p["x"])), round(float(p["y"])))
+        for p in (event.selection.get("points", []) if event else [])
+        if p.get("curve_number") == target
+    ]
+    if picked and tuple(picked) != ss.get(f"{KEY}_locmap_used"):
+        ss[f"{KEY}_locmap_used"] = tuple(picked)
+        ss[f"{KEY}_loc_next"] = picked[-1]
+        st.rerun()
+    st.caption(
+        f"Klik op de kaart om het middelpunt van het model daar te leggen (op ca. {edge:.0f} m; "
+        "kies een smallere kaart voor meer precisie). Slepen verschuift de kaart, scrollen "
+        f"zoomt. {pdok.BACKGROUND_SOURCE[kind]}."
+    )
 
 
 @st.cache_data(ttl=7 * 24 * 3600, max_entries=10, show_spinner="Maaiveld ophalen bij PDOK (AHN)…")

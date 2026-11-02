@@ -7,8 +7,9 @@ MODFLOW-style head-dependent boundaries:
 - ``drn``: flux C (level - h) while h > level, else 0;
 - ``ghb``: flux C (stage - h), always active;
 
-plus fixed fluxes (wells), an outer ring of fixed heads per layer, and horizontal flow
-barriers (sheet pile walls) on cell faces, as the MODFLOW 6 HFB package.
+plus fixed fluxes (wells), an outer ring of fixed heads per layer, groups of fixed-head
+cells (as the MODFLOW 6 CHD package), and horizontal flow barriers (sheet pile walls) on cell
+faces, as the MODFLOW 6 HFB package.
 
 The on/off switching is solved by Picard iteration: solve, update every state, repeat until
 no state changes. A layer can be *convertible* (MODFLOW 6 ICELLTYPE > 0): its transmissivity
@@ -91,6 +92,16 @@ class HeadBoundary:
     conductance: np.ndarray  # [m2/d] per entry
     stage: np.ndarray  # [m] stage (riv) or drain level (drn)
     bottom: np.ndarray  # [m] riv bottom; ignored for drn and ghb
+
+
+@dataclass(frozen=True)
+class FixedHeads:
+    """Group of fixed-head cells (CHD): ``head`` [m] per entry. Its flux is what holds the
+    heads (the residual of the cell equations), positive = into the groundwater."""
+
+    name: str
+    keys: np.ndarray  # flat unknown indices (node, row, col)
+    head: np.ndarray
 
 
 @dataclass(frozen=True)
@@ -248,6 +259,7 @@ def solve_grid(
     factorization: Factorization | None = None,
     convertible: Sequence[Convertible | None] = (),
     barriers: Sequence[Barrier] = (),
+    fixed_cells: Sequence[FixedHeads] = (),
 ) -> GridSolution:
     """``T`` per layer and ``c`` between layers: a number, or an (nrow, ncol) array for a
     subsoil that varies per cell.
@@ -259,7 +271,8 @@ def solve_grid(
     of a previous run. ``factorization``: shared LU cache, only for runs on the same grid.
     ``convertible``: per layer a :class:`Convertible` or None (fixed); for a convertible
     layer ``T`` is only the starting value. ``barriers``: horizontal flow barriers on cell
-    faces, applied in order (two on the same face act in series)."""
+    faces, applied in order (two on the same face act in series). ``fixed_cells``: groups of
+    fixed-head cells; on the outer ring they replace the ring head."""
     factorization = factorization or Factorization()
     nl = len(T)
     n = nl * nrow * ncol
@@ -313,6 +326,11 @@ def solve_grid(
         if hf is not None:
             fixed[idx[layer, ring]] = True
             h_fix[idx[layer, ring]] = hf
+    on_ring = fixed.copy()
+    for g in fixed_cells:
+        fixed[g.keys] = True
+        h_fix[g.keys] = g.head
+        on_ring[g.keys] = False
     free = np.flatnonzero(~fixed)
     fix = np.flatnonzero(fixed)
 
@@ -409,8 +427,21 @@ def solve_grid(
 
     M, rhs = assemble(active)
     lateral = 0.0
-    if fix.size:  # external inflow needed to hold the ring = residual of the full equations
-        lateral = float((M @ h - rhs)[fix].sum())
+    if fix.size:  # external inflow needed to hold the heads = residual of the full equations
+        # without the flow between two fixed cells of the same layer (as the MODFLOW 6 budget;
+        # vertically MF6 has the aquitard as a model layer in between, so that flow counts)
+        between = M[fix][:, fix].tocoo()
+        same = (between.row != between.col) & (
+            fix[between.row] // (nrow * ncol) == fix[between.col] // (nrow * ncol)
+        )
+        between = sp.csr_matrix(
+            (between.data[same], (between.row[same], between.col[same])), shape=between.shape
+        )
+        residual = M @ h - rhs
+        residual[fix] += between.sum(axis=1).A1 * h[fix] - between @ h[fix]
+        lateral = float(residual[on_ring].sum())
+        for g in fixed_cells:
+            flux_out[g.name] = float(residual[g.keys].sum())
 
     response = None
     if fluxes and np.any(rhs_fixed_flux != 0):  # linear response to the fixed fluxes alone

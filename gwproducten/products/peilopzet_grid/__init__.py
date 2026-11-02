@@ -14,13 +14,14 @@ from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 
 from gwproducten.core.grids import Face
-from gwproducten.core.layers import TOP_MODE_LABEL, LayerStack, build_layers
+from gwproducten.core.layers import MAX_AQUIFERS, TOP_MODE_LABEL, LayerStack, build_layers
 from gwproducten.core.params import ParamError, param, range_errors
 from gwproducten.numeric.grid2d import (
     MIN_SATURATED_FRACTION,
     Barrier,
     Convertible,
     Factorization,
+    FixedHeads,
     FluxBoundary,
     HeadBoundary,
     grid_resistance,
@@ -45,8 +46,10 @@ META = {
 
 THEORY = (Path(__file__).parent / "theory.md").read_text(encoding="utf-8")
 
-MAX_AQUIFERS = 4
 MAX_CELLS_PER_SIDE = 100
+# With many computational layers the exact LU grows fast; these smaller grids keep the largest
+# run near that of 100 x 100 x 5 layers (~2 s, ~0.35 GB; measured 2026-11-02).
+MAX_CELLS_BY_NODES = {6: 85, 7: 75}
 MAX_ZONES = 5
 BOUNDARIES = ("vast", "doorlopend", "gesloten", "per_laag")
 RING_KINDS = ("vast", "doorlopend", "gesloten")  # per layer with "per_laag"
@@ -113,6 +116,17 @@ class GhbGroup:
 
 
 @dataclass(frozen=True)
+class ChdGroup:
+    """Fixed head (CHD) on a set of cells of one layer: the head is held, the flux follows."""
+
+    name: str = "CHD"
+    cells: tuple[Cell, ...] = ()
+    layer: str = "freatisch"
+    head_ref: float = param(3.8, "m NAP", "Stijghoogte referentie", -50.0, 50.0)
+    head_new: float = param(3.8, "m NAP", "Stijghoogte na opzet", -50.0, 50.0)
+
+
+@dataclass(frozen=True)
 class Wall:
     """Sheet pile wall (damwand) on cell faces, from the top down to and including node
     ``layer``; ``resistance`` c_w [d] or None (impermeable). ``reference``: also in the
@@ -126,6 +140,11 @@ class Wall:
 
 
 WALL_RESISTANCE = (1e-3, 1e7)  # [d] range of a leaky wall
+
+
+def max_cells_per_side(n_nodes: int) -> int:
+    """Largest number of cells per side for a stack with ``n_nodes`` computational layers."""
+    return MAX_CELLS_BY_NODES.get(n_nodes, MAX_CELLS_PER_SIDE)
 
 
 def column_cells(col: int, rows: range | list[int]) -> tuple[Cell, ...]:
@@ -193,6 +212,7 @@ class Params:
     watercourses: tuple[Watercourse, ...] = field(default=DEFAULT_WATERCOURSES)
     wells: tuple[WellGroup, ...] = ()
     ghb: tuple[GhbGroup, ...] = ()
+    chd: tuple[ChdGroup, ...] = ()
     walls: tuple[Wall, ...] = ()
     zones: tuple[Zone, ...] = ()
     seepage: bool = False
@@ -236,26 +256,31 @@ class Params:
                 errors.append(f"Modelrand per laag: kies uit {', '.join(RING_KINDS)}.")
             elif any(kind != "gesloten" and head is None for kind, head in ring_layers(self)):
                 errors.append("Modelrand per laag: een vaste of doorlopende rand heeft een peil.")
+        max_cells = max_cells_per_side(n_nodes)
+        layers_note = f" bij {n_nodes} rekenlagen" if max_cells < MAX_CELLS_PER_SIDE else ""
         for size, name in ((self.size_x, "Breedte"), (self.size_y, "Hoogte")):
             if abs(size / self.cell - round(size / self.cell)) > 1e-9:
                 errors.append(
                     f"{name} van het model ({size:g} m) moet deelbaar zijn door de celgrootte "
                     f"({self.cell:g} m)."
                 )
-            elif round(size / self.cell) > MAX_CELLS_PER_SIDE:
+            elif round(size / self.cell) > max_cells:
                 errors.append(
-                    f"{name} van het model ({size:g} m) is te groot: maximaal "
-                    f"{MAX_CELLS_PER_SIDE} cellen per zijde, bij {self.cell:g} m dus hooguit "
-                    f"{MAX_CELLS_PER_SIDE * self.cell:g} m."
+                    f"{name} van het model ({size:g} m) is te groot: maximaal {max_cells} cellen "
+                    f"per zijde{layers_note}, bij {self.cell:g} m dus hooguit "
+                    f"{max_cells * self.cell:g} m."
                 )
         if errors:
             raise ParamError(errors)
         names = [
-            g.name for g in (*self.watercourses, *self.wells, *self.ghb, *self.walls, *self.zones)
-        ]
+            g.name
+            for g in (*self.watercourses, *self.wells, *self.ghb, *self.chd, *self.walls,
+                      *self.zones)
+        ]  # fmt: skip
         if len(set(names)) != len(names):
             errors.append(
-                "Elke watergang, putgroep, GHB-groep, damwand en zone moet een unieke naam hebben."
+                "Elke watergang, putgroep, GHB-groep, CHD-groep, damwand en zone moet een unieke "
+                "naam hebben."
             )
         if any(n in RESERVED_NAMES for n in names):
             errors.append(f"Deze namen zijn gereserveerd: {', '.join(RESERVED_NAMES)}.")
@@ -263,7 +288,7 @@ class Params:
         if errors:
             raise ParamError(errors)
         node_keys = [n.key for n in self.stack.nodes]
-        for g in (*self.wells, *self.ghb):
+        for g in (*self.wells, *self.ghb, *self.chd):
             prefix = f"{g.name}: "
             errors += range_errors(g, prefix)
             if g.layer not in node_keys:
@@ -274,6 +299,16 @@ class Params:
                 errors.append(f"{prefix}er zijn geen cellen toegewezen.")
             if any(not (0 <= r < self.nrow and 0 <= c < self.ncol) for r, c in g.cells):
                 errors.append(f"{prefix}een of meer cellen liggen buiten het rooster.")
+        held: dict[tuple[str, int, int], str] = {}
+        for g in self.chd:
+            for r, c in g.cells:
+                other = held.setdefault((g.layer, r, c), g.name)
+                if other != g.name:
+                    errors.append(
+                        f"{g.name}: cel ({r}, {c}) ligt al in CHD '{other}'; een cel kan niet in "
+                        "meer dan één CHD-groep van dezelfde laag liggen."
+                    )
+                    break
         cols = columns(self)
         zmap = zone_map(self)
         for wc in self.watercourses:
@@ -720,6 +755,38 @@ def _boundaries(params: Params, sub: Subsoil, stage: str, cond) -> list[HeadBoun
     return out
 
 
+def _fixed_cells(params: Params, sub: Subsoil, stage: str) -> list[FixedHeads]:
+    nl, nr, nc = len(sub.nodes), params.nrow, params.ncol
+    idx = np.arange(nl * nr * nc).reshape(nl, nr, nc)
+    keys = [n.key for n in sub.nodes]
+    out = []
+    for g in params.chd:
+        k = np.array([idx[keys.index(g.layer), r, c] for r, c in g.cells])
+        head = g.head_ref if stage == "ref" else g.head_new
+        out.append(FixedHeads(g.name, k, np.full(k.size, head)))
+    return out
+
+
+def _chd_overlaps(params: Params, sub: Subsoil, boundaries: list[HeadBoundary]) -> list[str]:
+    """Warnings for objects in a CHD cell of the same layer (they do not act there)."""
+    held: dict[int, str] = {}
+    for g in _fixed_cells(params, sub, "ref"):
+        held.update(dict.fromkeys(g.keys.tolist(), g.name))
+    if not held:
+        return []
+    groups = [(b.name, b.keys) for b in boundaries if b.name not in ("maaiveld", RING_GHB)]
+    groups += [(f.name, f.keys) for f in _wells(params, sub, "ref")]
+    out = []
+    for name, keys in groups:
+        hit = sorted({held[k] for k in keys.tolist() if k in held})
+        if hit:
+            out.append(
+                f"{name} ligt (deels) in een cel met vaste stijghoogte ({', '.join(hit)}) en werkt "
+                "daar niet, net als in MODFLOW 6: de CHD houdt de stijghoogte vast."
+            )
+    return out
+
+
 def _wells(params: Params, sub: Subsoil, stage: str) -> list[FluxBoundary]:
     nl, nr, nc = len(sub.nodes), params.nrow, params.ncol
     idx = np.arange(nl * nr * nc).reshape(nl, nr, nc)
@@ -812,6 +879,7 @@ def compute(params: Params) -> Result:
             fluxes=_wells(params, sub, run) if with_wells else (),
             initial_active=None if start is None else start.active,
             factorization=factorization, convertible=convertible, barriers=_barriers(params, run),
+            fixed_cells=_fixed_cells(params, sub, run),
         )  # fmt: skip
 
     # the opzet run without wells gives the (nonlinear) well drawdown
@@ -833,6 +901,7 @@ def compute(params: Params) -> Result:
         *[wc.name for wc in params.watercourses],
         *[g.name for g in params.wells],
         *[g.name for g in params.ghb],
+        *[g.name for g in params.chd],
     ]
     if params.seepage:
         rows.append("kwel onderrand")
@@ -878,7 +947,7 @@ def compute(params: Params) -> Result:
         ]
     )
 
-    warnings = []
+    warnings = _chd_overlaps(params, sub, boundaries("ref"))
     lam_min = np.inf
     if len(nodes) > 1:
         lam_min = min(
@@ -1054,7 +1123,7 @@ def _mf6_runs(params, boundaries, sub, fixed, T, convertible, need_no_wells):
                 sols[key], newton = mf6.solve(
                     params, boundaries(stage),
                     _wells(params, sub, stage) if with_wells else [], fixed, T, convertible,
-                    Path(tmp) / key, _barriers(params, stage),
+                    Path(tmp) / key, _barriers(params, stage), _fixed_cells(params, sub, stage),
                 )  # fmt: skip
                 newton_used |= newton
     except (RuntimeError, OSError) as err:
