@@ -9,6 +9,14 @@ APP = Path(__file__).resolve().parent.parent / "app"
 PAGES = [APP / "Home.py", *sorted((APP / "pages").glob("*.py"))]
 
 
+@pytest.fixture(autouse=True)
+def _no_map_service(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Offline: maps (location map, backgrounds) get a stand-in image instead of PDOK."""
+    from gwproducten.geo import pdok
+
+    monkeypatch.setattr(pdok, "background_image", lambda kind, bbox: b"\xff\xd8fake")
+
+
 def _toolbox(page: str, timeout: int) -> AppTest:
     """The page with the example loaded (the Grondwatertoolbox starts empty)."""
     at = AppTest.from_file(page, default_timeout=timeout).run()
@@ -189,6 +197,22 @@ def test_grid_product_four_aquifers() -> None:
         assert not at.exception, [e.value for e in at.exception]
 
 
+def test_grid_product_six_aquifers_and_grid_limit() -> None:
+    """6 aquifers (6 nodes under a freatisch pakket) compute on 40 x 40 cells; at 10 m cells
+    (100 x 100) step 1 warns about the limit of 85 x 85 and step 3 refuses to compute."""
+    page = str(APP / "pages" / "1_Grondwatertoolbox.py")
+    at = _toolbox(page, 120)
+    at.number_input(key="p3_naq_freatisch_zand").set_value(6).run()
+    at.button(key="p3_calc").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert not at.error, [e.value for e in at.error]
+    assert len(at.session_state["p3_result"]["res"].node_labels) == 6
+    at.number_input(key="p3_cell").set_value(10.0).run()
+    assert any("maximaal 85 × 85" in w.value for w in at.warning)
+    at.button(key="p3_calc").click().run()
+    assert any("85 cellen per zijde bij 6 rekenlagen" in e.value for e in at.error)
+
+
 def test_grid_product_zones() -> None:
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
     at = _toolbox(page, 120)
@@ -275,6 +299,110 @@ def test_maps_keep_zoom_and_snap_generously() -> None:
     x = y = (np.arange(40) + 0.5) * 25.0
     res = result_figure(x, y, np.zeros((40, 40)), 25.0, [], label="h", click_snap=10.0)
     assert res.layout.uirevision and res.layout.hoverdistance == 50
+
+
+def test_limit_lines_for_rise_and_drawdown() -> None:
+    """The 'verhoging' map gets a red +5 cm and a blue -5 cm line where the field reaches
+    them; the wells map (positive = drawdown) a blue 5 cm drawdown line."""
+    import sys
+
+    import numpy as np
+
+    sys.path.insert(0, str(APP))
+    from grid_ui import DRAWDOWN_COLOR, THRESHOLD_COLOR, result_figure
+    from result_ui import limit_lines
+
+    x = y = (np.arange(10) + 0.5) * 25.0
+    z = np.tile(np.linspace(-0.2, 0.2, 10), (10, 1))  # drawdown on the left, rise on the right
+    lines = {t.name: t.line.color for t in result_figure(
+        x, y, z, 25.0, [], label="m", limits=limit_lines(0.05, "verhoging")).data[1:]}  # fmt: skip
+    assert lines == {"5 cm verhoging": THRESHOLD_COLOR, "5 cm verlaging": DRAWDOWN_COLOR}
+    rise_only = result_figure(x, y, np.abs(z), 25.0, [], label="m",
+                              limits=limit_lines(0.05, "verhoging"))  # fmt: skip
+    assert [t.name for t in rise_only.data[1:]] == ["5 cm verhoging"]
+    wells = result_figure(x, y, np.abs(z), 25.0, [], label="m", limits=limit_lines(0.05, "putten"))
+    assert [(t.name, t.line.color) for t in wells.data[1:]] == [("5 cm verlaging", DRAWDOWN_COLOR)]
+    assert limit_lines(0.05, "opzet") == []
+
+
+def test_grid_product_dewatering_shows_drawdown_limit() -> None:
+    """A well pumping only after the change: negative rise, drawdown tiles with the area of
+    >= 5 cm drawdown, the blue limit line on the map and the -5 cm line in the profile."""
+    page = str(APP / "pages" / "1_Grondwatertoolbox.py")
+    at = _toolbox(page, 120)
+    at.session_state["p3_wells"] = [
+        {"name": "Bemaling", "layer": "freatisch", "q_ref": 0.0, "q_new": 300.0,
+         "points": {(512.5, 512.5)}},
+    ]  # fmt: skip
+    at.run()
+    at.button(key="p3_calc").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    res = at.session_state["p3_result"]["res"]
+    area = float((res.rise[0] <= -0.05).sum()) * 25.0**2 / 1e4
+    assert area > 0.0
+    tiles = {m.label: m.value for m in at.metric}
+    assert tiles["Oppervlak verlaging ≥ 5 cm"] == f"{area:.1f} ha"
+    assert float(tiles["Max. verlaging freatisch"].split()[0]) > 0.05
+    out = at.session_state["p3_out"]
+    assert "5 cm verlaging" in [t.name for t in out["fig_res"].data]
+    assert any(s.y0 == -0.05 for s in out["fig_prof"].layout.shapes)
+
+
+def test_grid_product_chd_group() -> None:
+    """A CHD group drawn on the map: computed, own row in the water balance, in the table of
+    step 2 and on the result map; saved and loaded with the project."""
+    import json
+
+    from project_io import apply_project, parse_project, to_json
+
+    page = str(APP / "pages" / "1_Grondwatertoolbox.py")
+    at = _toolbox(page, 120)
+    at.session_state["p3_chd"] = [
+        {"name": "Plas", "layer": "pakket1", "head_ref": 3.8, "head_new": 4.1,
+         "points": {(12.5 + 25 * c, 512.5) for c in range(5)}},
+    ]  # fmt: skip
+    at.run()
+    at.button(key="p3_calc").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert not at.error, [e.value for e in at.error]
+    par = at.session_state["p3_result"]["params"]
+    assert [(g.name, len(g.cells)) for g in par.chd] == [("Plas", 5)]
+    res = at.session_state["p3_result"]["res"]
+    assert res.heads_new[1, 20, 2] == pytest.approx(4.1)
+    assert res.budget.loc["Plas", "opzet [m³/d]"] > 0  # raised: water into the ground
+    assert any(d.value["Naam"].tolist() == ["Plas"] for d in at.dataframe if "Naam" in d.value)
+    assert "Plas" in [t.name for t in at.session_state["p3_out"]["fig_res"].data]
+    data, errors = parse_project(to_json(at.session_state, "p3"))
+    assert not errors and json.loads(to_json(at.session_state, "p3"))["objecten"]["chd"]
+    state: dict = {}
+    apply_project(state, "p3", data)
+    assert state["p3_chd"][0]["points"] == at.session_state["p3_chd"][0]["points"]
+
+
+def test_grid_product_undo_restores_the_drawing() -> None:
+    """'Ongedaan maken' steps back through the changes of the drawing: clearing, then loading
+    the example; it is disabled when there is nothing to undo."""
+    page = str(APP / "pages" / "1_Grondwatertoolbox.py")
+    at = AppTest.from_file(page, default_timeout=120).run()
+    assert at.button(key="p3_undo_draw").disabled
+    at.button(key="p3_ex").click().run()
+    names = [wc["name"] for wc in at.session_state["p3_wcs"]]
+    assert len(names) == 2
+    at.session_state["p3_obj"] = "zone"
+    at.run()
+    at.button(key="p3_zone_add").click().run()  # a zone (step 1), also undoable
+    assert len(at.session_state["p3_zones"]) == 1
+    at.button(key="p3_clear").click().run()
+    assert at.session_state["p3_wcs"] == [] and at.session_state["p3_zones"] == []
+    at.button(key="p3_undo_draw").click().run()
+    assert [wc["name"] for wc in at.session_state["p3_wcs"]] == names
+    assert len(at.session_state["p3_zones"]) == 1
+    at.button(key="p3_undo_draw").click().run()
+    assert at.session_state["p3_zones"] == []
+    at.button(key="p3_undo_draw").click().run()
+    assert at.session_state["p3_wcs"] == []
+    assert at.button(key="p3_undo_draw").disabled
+    assert not at.exception, [e.value for e in at.exception]
 
 
 def test_grid_product_project_roundtrip() -> None:
@@ -461,6 +589,77 @@ def test_grid_product_location_sets_rd_origin() -> None:
     assert (params.origin_x, params.origin_y) == (136300.0, 455400.0)  # centre - 500 m
     saved = export_project(at.session_state, "p3")["invoer"]
     assert saved["geo"] is True and saved["cx"] == 136800.0 and saved["cy"] == 455900.0
+
+
+def test_grid_product_location_map_click_moves_centre() -> None:
+    """The location map shows the model area around the centre; a click (handed over as the
+    pending point, as the map does) moves the centre there, within the RD range."""
+    page = str(APP / "pages" / "1_Grondwatertoolbox.py")
+    at = _toolbox(page, 120)
+    at.toggle(key="p3_geo").set_value(True).run()
+    at.number_input(key="p3_cx").set_value(136800.0).run()
+    at.number_input(key="p3_cy").set_value(455900.0).run()
+    charts = [c for c in at.get("plotly_chart") if '"modelgebied"' in c.proto.spec]
+    assert len(charts) == 1
+    at.session_state["p3_loc_next"] = (137012, 456321)
+    at.run()
+    assert (at.number_input(key="p3_cx").value, at.number_input(key="p3_cy").value) == (
+        137012, 456321,
+    )  # fmt: skip
+    at.session_state["p3_loc_next"] = (137000, 900000)  # beyond the RD range: clipped
+    at.run()
+    assert at.number_input(key="p3_cy").value == 625000.0
+    assert not at.exception, [e.value for e in at.exception]
+
+
+def test_drawing_map_colours_lines_and_greys_cells() -> None:
+    """A drawn watercourse: its own colour on the line, grey cells; one of cells only keeps
+    its colour in the cells."""
+    import sys
+
+    sys.path.insert(0, str(APP))
+    from grid_ui import PALETTE, WC_CELL_GREY, drawing_figure, wc_geometry
+
+    wcs = [
+        {"name": "lijn", "lines": [[(10.0, 0.0), (10.0, 100.0)]], "points": set(), "length": 25.0},
+        {"name": "lasso", "lines": [], "points": {(87.5, 87.5)}, "length": 25.0},
+    ]  # fmt: skip
+    for wc in wcs:
+        wc["cells"], wc["lengths"], _ = wc_geometry(wc, 25.0, 4, 4)
+    fig = drawing_figure(4, 4, 25.0, wcs, ())
+    heat = {t.name: t.colorscale[-1][1] for t in fig.data if t.type == "heatmap"}
+    assert heat == {"lijn": WC_CELL_GREY, "lasso": PALETTE[1]}
+    drawn = [t for t in fig.data if t.type == "scatter" and t.name == "lijn" and t.x[0] is not None]
+    assert drawn and drawn[0].line.color == PALETTE[0]
+    hidden = drawing_figure(4, 4, 25.0, wcs, (), show_cells=False)
+    visible = {t.name: t.visible for t in hidden.data if t.type == "heatmap"}
+    assert visible == {"lijn": False, "lasso": True}  # cells only: always shown
+
+
+def test_watercourse_styles_are_unique_for_thirty() -> None:
+    """10 colours x solid/dashed/dotted: 30 distinct styles; the table icon draws the same."""
+    import base64
+    import sys
+
+    sys.path.insert(0, str(APP))
+    from grid_ui import MAX_DRAW_LEGEND, wc_icon, wc_line_style
+
+    styles = [wc_line_style(k) for k in range(MAX_DRAW_LEGEND)]
+    assert len(set(styles)) == MAX_DRAW_LEGEND == 30
+    assert styles[10] == (styles[0][0], "dash")
+    svg = base64.b64decode(wc_icon(10).split(",", 1)[1]).decode()
+    assert styles[0][0] in svg and "stroke-dasharray" in svg
+
+
+def test_grid_product_gis_button_needs_location() -> None:
+    page = str(APP / "pages" / "1_Grondwatertoolbox.py")
+    at = _toolbox(page, 120)
+    at.button(key="p3_calc").click().run()
+    assert any("locatie aan" in c.value for c in at.caption)
+    at.toggle(key="p3_geo").set_value(True).run()
+    at.button(key="p3_calc").click().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any("EPSG:28992" in c.value for c in at.caption)
 
 
 def test_grid_product_background_map(monkeypatch: pytest.MonkeyPatch) -> None:

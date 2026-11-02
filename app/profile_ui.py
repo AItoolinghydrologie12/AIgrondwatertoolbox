@@ -14,6 +14,7 @@ from scipy.interpolate import RegularGridInterpolator
 
 SURFACE_COLOR = "#8c6d46"
 RISE_COLOR = "rgba(214,40,40,0.25)"
+DRAWDOWN_SHOWN = 0.01  # [m] smallest freatic drawdown that shows the drawdown limit and tiles
 LAYER_COLORS = ("#1f77b4", "#2ca02c")
 
 
@@ -147,10 +148,21 @@ def profile_figure(
         ),
         secondary_y=True,
     )  # fmt: skip
+    rise = df[f"verhoging {top} [m]"]
+    rise_max = max(float(np.nanmax(rise)), threshold)
+    drawdown = -min(float(np.nanmin(rise)), 0.0)
     fig.add_hline(
         y=threshold, secondary_y=True, line={"color": "#d62828", "dash": "dot", "width": 1},
         annotation_text=f"{threshold * 100:.0f} cm", annotation_position="right",
     )  # fmt: skip
+    if drawdown >= DRAWDOWN_SHOWN:  # a dewatering: the drawdown limit as well
+        drawdown = max(drawdown, threshold)
+        fig.add_hline(
+            y=-threshold, secondary_y=True, line={"color": "#1f5fbf", "dash": "dot", "width": 1},
+            annotation_text=f"−{threshold * 100:.0f} cm", annotation_position="right",
+        )  # fmt: skip
+    else:
+        drawdown = 0.0
     fig.add_trace(
         go.Scatter(
             x=d, y=df["maaiveld [m NAP]"], name="maaiveld", mode="lines",
@@ -194,12 +206,11 @@ def profile_figure(
             x=dist, y=0.0, yref="paper", text=f"{name} (damwand)", showarrow=False,
             textangle=-90, font={"size": 11}, xanchor="right", yanchor="bottom",
         )  # fmt: skip
-    rise_max = max(float(np.nanmax(df[f"verhoging {top} [m]"])), threshold)
     fig.update_yaxes(title_text="stijghoogte [m NAP]", secondary_y=False)
     fig.update_yaxes(
-        title_text="verhoging [m]",
+        title_text="verhoging [m]" if drawdown == 0.0 else "verhoging (− = verlaging) [m]",
         secondary_y=True,
-        range=[0, 3.0 * rise_max],
+        range=[-3.0 * drawdown, 3.0 * rise_max],
         showgrid=False,
         tickmode="auto",
         nticks=6,

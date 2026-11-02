@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -9,17 +11,44 @@ import plotly.graph_objects as go
 
 from gwproducten.core.grids import Face, outline_faces, polyline_cell_lengths, polyline_faces
 
+# watercourse colours, without grey: the cells of a drawn watercourse are grey
 PALETTE = (
-    "#1f77b4", "#ff7f0e", "#9467bd", "#8c564b", "#e377c2", "#17becf", "#bcbd22", "#7f7f7f",
+    "#1f77b4", "#ff7f0e", "#9467bd", "#8c564b", "#e377c2", "#bcbd22", "#2ca02c", "#000080",
+    "#b8860b", "#00a6a6",
 )  # fmt: skip
 DRAIN_COLOR = "#7fbf7b"
 GHB_COLOR = "#17becf"
+CHD_COLOR = "#7b4fa6"
 WELL_COLOR = "#111111"
 WALL_COLOR = "#000000"
-THRESHOLD_COLOR = "#d62828"
-MAX_LEGEND = 8  # watercourses in the legend; more would push the map away
+THRESHOLD_COLOR = "#d62828"  # limit line of a rise (verhoging)
+DRAWDOWN_COLOR = "#1f5fbf"  # limit line of a drawdown (verlaging)
+MAX_LEGEND = 8  # watercourses in the legend of the result map; more would push the map away
+WC_DASHES = ("solid", "dash", "dot")  # with the colours: a unique style for 30 watercourses
+MAX_DRAW_LEGEND = len(PALETTE) * len(WC_DASHES)  # watercourses in the drawing-map legend
+SVG_DASH = {"solid": "", "dash": "6,3", "dot": "2,3"}
+
+
+def wc_line_style(k: int) -> tuple[str, str]:
+    """(colour, dash) of the k-th watercourse: the colours first, then dashed, then dotted."""
+    return PALETTE[k % len(PALETTE)], WC_DASHES[(k // len(PALETTE)) % len(WC_DASHES)]
+
+
+def wc_icon(k: int) -> str:
+    """Small line in the style of the k-th watercourse, as an SVG data URI (for tables)."""
+    colour, dash = wc_line_style(k)
+    dasharray = f' stroke-dasharray="{SVG_DASH[dash]}"' if SVG_DASH[dash] else ""
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="12">'
+        f'<line x1="2" y1="6" x2="38" y2="6" stroke="{colour}" stroke-width="4"{dasharray}/>'
+        "</svg>"
+    )
+    return "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()
+
+
 WC_STYLES = {"lijnen": "dunne lijnen", "cellen": "cellen", "uit": "uit"}
 WC_LINE_COLOR = "rgba(20,20,20,0.55)"
+WC_CELL_GREY = "#7f7f7f"  # cells of a drawn line; darker = more length in the cell
 SNAP_POINTS = 100  # click points along the longest side when drawing a line
 ZONE_COLORS = ("#c9a227", "#6a994e", "#bc4749", "#577590", "#9d4edd")
 
@@ -102,13 +131,17 @@ def drawing_figure(
     snap: float | None = None,
     wells: list[dict[str, Any]] | None = None,
     ghbs: list[dict[str, Any]] | None = None,
+    chds: list[dict[str, Any]] | None = None,
     zones: list[dict[str, Any]] | None = None,
     outlines: list[list[tuple[float, float]]] | None = None,
     walls: list[dict[str, Any]] | None = None,
     highlight: str | None = None,
+    show_cells: bool = True,
 ) -> go.Figure:
-    """Grid with zones (subsoil), level-area borders (``outlines``), watercourses (shade =
-    length in the cell), drawn lines, pipe-drained cells and walls (on cell faces); the
+    """Grid with zones (subsoil), level-area borders (``outlines``), watercourses (each its
+    own colour on the drawn line, its cells grey with the shade = length in the cell; a
+    watercourse of cells only keeps its colour in the cells), pipe-drained cells and walls
+    (on cell faces); ``show_cells`` False leaves out the grey cells of drawn lines; the
     watercourse named ``highlight`` is outlined in red. The last trace is the selection
     target: cell centres (box/lasso), or a snap grid of spacing ``snap`` for clicking line
     vertices."""
@@ -139,41 +172,48 @@ def drawing_figure(
             )
         )  # fmt: skip
     for k, wc in enumerate(watercourses):
-        colour = PALETTE[k % len(PALETTE)]
+        colour, dash = wc_line_style(k)
+        lines = wc.get("lines", [])
         fig.add_trace(
             _cell_heatmap(
                 dict(zip(wc["cells"], wc["lengths"], strict=True)), cell, zmin=0.0, zmax=cell,
-                colorscale=[[0, "rgba(255,255,255,0.6)"], [1, colour]], showscale=False,
+                colorscale=[[0, "rgba(255,255,255,0.6)"], [1, WC_CELL_GREY if lines else colour]],
+                showscale=False, name=wc["name"],
                 hovertemplate=wc["name"] + "<br>lengte in cel %{z:.1f} m<extra></extra>",
-                name=wc["name"],
+                visible=show_cells or not lines,
             )
         )  # fmt: skip
-        for line in wc.get("lines", []):
+        for line in lines:
             fig.add_trace(
                 go.Scatter(
                     x=[p[0] for p in line], y=[p[1] for p in line], mode="lines",
-                    line={"color": "black", "width": 2}, hoverinfo="skip", showlegend=False,
+                    line={"color": colour, "width": 4, "dash": dash}, name=wc["name"],
+                    showlegend=False,
+                    hovertemplate=wc["name"] + "<extra></extra>",
                 )
             )  # fmt: skip
         fig.add_trace(  # legend entry; with many watercourses only the hover names them
             go.Scatter(
-                x=[None], y=[None], mode="markers", name=wc["name"],
+                x=[None], y=[None], mode="lines" if lines else "markers", name=wc["name"],
+                line={"color": colour, "width": 4, "dash": dash},
                 marker={"symbol": "square", "size": 12, "color": colour},
-                showlegend=len(watercourses) <= MAX_LEGEND,
+                showlegend=len(watercourses) <= MAX_DRAW_LEGEND,
             )
         )  # fmt: skip
-    for g in ghbs or []:
+    groups = [(g, "GHB", GHB_COLOR) for g in ghbs or []]
+    groups += [(g, "CHD", CHD_COLOR) for g in chds or []]
+    for g, kind, colour in groups:
         fig.add_trace(
             _cell_heatmap(
-                dict.fromkeys(g["cells"], 1.0), cell, colorscale=[[0, GHB_COLOR], [1, GHB_COLOR]],
+                dict.fromkeys(g["cells"], 1.0), cell, colorscale=[[0, colour], [1, colour]],
                 showscale=False, opacity=0.7, name=g["name"],
-                hovertemplate=g["name"] + " (GHB)<extra></extra>",
+                hovertemplate=f"{g['name']} ({kind})<extra></extra>",
             )
         )  # fmt: skip
         fig.add_trace(
             go.Scatter(
-                x=[None], y=[None], mode="markers", name=f"{g['name']} (GHB)",
-                marker={"symbol": "square", "size": 12, "color": GHB_COLOR},
+                x=[None], y=[None], mode="markers", name=f"{g['name']} ({kind})",
+                marker={"symbol": "square", "size": 12, "color": colour},
             )
         )  # fmt: skip
     for wc in watercourses:
@@ -255,7 +295,7 @@ def result_figure(
     watercourses: list[dict[str, Any]],
     *,
     label: str,
-    threshold: float | None = None,
+    limits: Sequence[tuple[float, str, str]] = (),
     diverging: bool = False,
     reverse: bool = False,
     profile: list[tuple[float, float]] | None = None,
@@ -265,9 +305,11 @@ def result_figure(
     walls: list[dict[str, Any]] | None = None,
     wc_style: str = "cellen",
 ) -> go.Figure:
-    """Contour map of a result field with the watercourses (``wc_style``: "cellen" outlines
-    their cells in colour, "lijnen" draws thin grey lines, "uit" leaves them out), an optional
-    profile line, and (``click_snap``) a last trace of click points on a snap grid.
+    """Contour map of a result field with ``limits`` (level, colour, legend name: a thick
+    line where the field crosses the level, e.g. the 5 cm limit) and the watercourses
+    (``wc_style``: "cellen" outlines their cells in colour, "lijnen" draws thin grey lines,
+    "uit" leaves them out), an optional profile line, and (``click_snap``) a last trace of
+    click points on a snap grid.
     ``min_span``: smallest half-range of a diverging scale, so that tiny values stay near
     white."""
     if diverging:
@@ -283,13 +325,15 @@ def result_figure(
             **scale,
         )
     )  # fmt: skip
-    if threshold is not None and np.nanmax(z) > threshold:
+    for level, colour, name in limits:
+        if not np.nanmin(z) < level < np.nanmax(z):
+            continue  # the field does not reach the level: no line
         fig.add_trace(
             go.Contour(
                 x=x, y=y, z=z32,
-                contours={"start": threshold, "end": threshold, "size": 1, "coloring": "none"},
-                line={"color": THRESHOLD_COLOR, "width": 4}, showscale=False, hoverinfo="skip",
-                name=f"{threshold * 100:.0f} cm-grens", showlegend=True,
+                contours={"start": level, "end": level, "size": 1, "coloring": "none"},
+                line={"color": colour, "width": 4}, showscale=False, hoverinfo="skip",
+                name=name, showlegend=True,
             )
         )  # fmt: skip
     if wc_style == "cellen":
@@ -300,7 +344,7 @@ def result_figure(
                 go.Scatter(
                     x=xs, y=ys, mode="markers", name=wc["name"],
                     marker={"symbol": "square-open", "size": 7,
-                            "color": PALETTE[k % len(PALETTE)], "line": {"width": 2}},
+                            "color": wc_line_style(k)[0], "line": {"width": 2}},
                     showlegend=len(watercourses) <= MAX_LEGEND,
                 )
             )  # fmt: skip

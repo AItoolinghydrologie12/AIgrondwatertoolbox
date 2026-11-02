@@ -28,7 +28,7 @@ TOP_MODE_LABEL = {
     "deklaag": "deklaag met freatisch niveau (polder)",
     "freatisch_zand": "freatisch zandpakket",
 }
-MAX_AQUIFERS = 4
+MAX_AQUIFERS = 6
 DEFAULT_ANISOTROPY = 0.33  # kv/kh of an aquifer
 # aquitard inserted where an aquifer is split (e.g. at the tip of a sheet pile wall)
 SPLIT_THICKNESS = 0.1  # [m], the minimum layer thickness

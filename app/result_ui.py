@@ -10,13 +10,20 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 from engine_ui import engine_badge, model_zip
-from grid_ui import WC_STYLES, add_background, result_figure
+from grid_ui import DRAWDOWN_COLOR, THRESHOLD_COLOR, WC_STYLES, add_background, result_figure
 from location_ui import background, background_caption, model_bbox
-from profile_ui import crossings, profile_figure, profile_table, wall_crossings
-from toolbox_state import KEY, MAP_CONFIG, ss
+from profile_ui import (
+    DRAWDOWN_SHOWN,
+    crossings,
+    profile_figure,
+    profile_table,
+    wall_crossings,
+)
+from toolbox_state import KEY, MAP_CONFIG, rerun_fragment, ss
 from ui_common import TABS, csv_button, dict_table, png_buttons, split_theory
 
 from gwproducten.products import peilopzet_grid as p3
+from gwproducten.products.peilopzet_grid.gis import to_gpkg
 
 VIEWS = {
     "verhoging": "Verhoging (opzet − referentie)",
@@ -31,6 +38,20 @@ PROFILE_MODES = {
     "lijn": "Eigen lijn",
 }
 BALANCE_OK = 1e-6
+
+
+def limit_lines(threshold: float, view: str) -> list[tuple[float, str, str]]:
+    """The limit lines of a map view: rise and drawdown on the 'verhoging' map (negative =
+    drawdown), drawdown on the wells map (positive = drawdown)."""
+    cm = f"{threshold * 100:.0f} cm"
+    if view == "verhoging":
+        return [
+            (threshold, THRESHOLD_COLOR, f"{cm} verhoging"),
+            (-threshold, DRAWDOWN_COLOR, f"{cm} verlaging"),
+        ]
+    if view == "putten":
+        return [(threshold, DRAWDOWN_COLOR, f"{cm} verlaging")]
+    return []
 
 
 def show_kpis(params: p3.Params, res: p3.Result, seconds: float) -> None:
@@ -76,6 +97,18 @@ def show_kpis(params: p3.Params, res: p3.Result, seconds: float) -> None:
         delta=f"{cells} cellen × {len(res.node_labels)} lagen",
         delta_color="off", delta_arrow="off", border=True,
     )  # fmt: skip
+    drawdown = -float(np.nanmin(rise0))
+    if drawdown >= DRAWDOWN_SHOWN:  # e.g. a dewatering: the same figures for the drawdown
+        area_dd = float((rise0 <= -params.threshold).sum()) * params.cell**2 / 1e4
+        row3 = st.columns(3)
+        row3[0].metric(
+            "Max. verlaging freatisch", f"{drawdown:.2f} m", border=True,
+            help="Grootste daling van de grondwaterstand (referentie − opzet) in het model.",
+        )  # fmt: skip
+        row3[1].metric(
+            f"Oppervlak verlaging ≥ {params.threshold * 100:.0f} cm", f"{area_dd:.1f} ha",
+            border=True, help="Som van de cellen waar de freatische verlaging de grens haalt.",
+        )  # fmt: skip
     for w_msg in res.warnings:
         st.warning(w_msg)
 
@@ -103,11 +136,11 @@ def profile_points(params: p3.Params) -> list[tuple[float, float]]:
     if c2.button("Laatste punt weg", disabled=not pts, key=f"{KEY}_pundo"):
         pts.pop()
         ss[f"{KEY}_pver"] = ss.get(f"{KEY}_pver", 0) + 1
-        st.rerun()
+        rerun_fragment()
     if c3.button("Profiel wissen", disabled=not pts, key=f"{KEY}_pclear"):
         ss[f"{KEY}_prof"] = []
         ss[f"{KEY}_pver"] = ss.get(f"{KEY}_pver", 0) + 1
-        st.rerun()
+        rerun_fragment()
     return list(pts)
 
 
@@ -155,26 +188,27 @@ def show_result(
     wc_style = c7.selectbox(
         "Watergangen", list(WC_STYLES), format_func=WC_STYLES.get, key=f"{KEY}_wcstyle",
         help="Dunne lijnen houden de contouren leesbaar bij veel watergangen; 'cellen' toont "
-        "per watergang de cellen in kleur (ook GHB); 'uit' laat ze weg.",
+        "per watergang de cellen in kleur (ook GHB en CHD); 'uit' laat ze weg.",
     )  # fmt: skip
     j = keys.index(layer)
     if view == "verhoging":
-        z, label, thr, rev = res.rise[j], "verhoging [m]", params.threshold, False
+        z, label, rev = res.rise[j], "verhoging [m]", False
     elif view == "opzet":
-        z, label, thr, rev = res.heads_new[j], "h [m NAP]", None, False
+        z, label, rev = res.heads_new[j], "h [m NAP]", False
     elif view == "ref":
-        z, label, thr, rev = res.heads_ref[j], "h [m NAP]", None, False
+        z, label, rev = res.heads_ref[j], "h [m NAP]", False
     elif view == "putten":
-        z, label, thr, rev = res.well_drawdown[j], "verlaging [m]", None, False
+        z, label, rev = res.well_drawdown[j], "verlaging [m]", False
     else:
-        z, label, thr, rev = res.surface - res.heads_new[0], "diepte gws [m-mv]", None, True
+        z, label, rev = res.surface - res.heads_new[0], "diepte gws [m-mv]", True
     map_box = st.container()
     pts = profile_points(params)
     clicking = ss.get(f"{KEY}_pmode") == "lijn"
     snap = max(params.cell / 2.0, max(params.size_x, params.size_y) / 100.0)
-    outlined = wcs_done + [{"name": g.name, "cells": g.cells} for g in params.ghb]
+    outlined = wcs_done + [{"name": g.name, "cells": g.cells} for g in (*params.ghb, *params.chd)]
     fig_res = result_figure(
-        res.x, res.y, z, params.cell, outlined, label=label, threshold=thr, reverse=rev,
+        res.x, res.y, z, params.cell, outlined, label=label, reverse=rev,
+        limits=limit_lines(params.threshold, view),
         profile=pts, click_snap=snap if clicking else None,
         wells=[{"name": g.name, "cells": g.cells} for g in params.wells],
         walls=[{"name": w.name, "faces": w.faces} for w in params.walls], wc_style=wc_style,
@@ -189,11 +223,14 @@ def show_result(
             on_select="rerun" if clicking else "ignore", selection_mode=("points",),
         )  # fmt: skip
         background_caption()
+        cm = f"{params.threshold * 100:.0f} cm"
         if view == "verhoging":
             st.caption(
-                f"Dikke rode lijn: {params.threshold * 100:.0f} cm-grens. "
-                "Witte stippellijn: dwarsprofiel A–B."
+                f"Dikke rode lijn: {cm} verhoging; dikke blauwe lijn: {cm} verlaging (negatieve "
+                "verhoging, bijv. bij een bemaling). Witte stippellijn: dwarsprofiel A–B."
             )
+        elif view == "putten":
+            st.caption(f"Dikke blauwe lijn: {cm} verlaging. Witte stippellijn: dwarsprofiel A–B.")
     if clicking and event:
         target = len(fig_res.data) - 1
         picked = [
@@ -206,7 +243,7 @@ def show_result(
             ss[f"{KEY}_used_psel"] = selection_id
             if not pts or pts[-1] != picked[-1]:
                 ss[f"{KEY}_prof"].append(picked[-1])
-                st.rerun()
+                rerun_fragment()
 
     fig_prof, prof = None, None
     if len(pts) >= 2:
@@ -262,6 +299,16 @@ def show_result(
     return fig_res, fig_prof, prof
 
 
+@st.fragment
+def result_panel(
+    params: p3.Params, res: p3.Result, wcs_done: list[dict[str, Any]], out: dict[str, Any]
+) -> None:
+    """The result map, profile and tables as a fragment: choosing another map, layer or
+    profile reruns only this panel. ``out`` receives the figures and the profile table for
+    the export (a plain dict, so a deferred download reads the latest profile)."""
+    out["fig_res"], out["fig_prof"], out["prof"] = show_result(params, res, wcs_done)
+
+
 def show_validation(params: p3.Params, res: p3.Result) -> None:
     st.markdown(
         "**Controles bij de berekende invoer.** Automatische tests: "
@@ -306,13 +353,8 @@ def show_validation(params: p3.Params, res: p3.Result) -> None:
         st.dataframe(pd.DataFrame(rows).round(4), hide_index=True)
 
 
-def show_export(
-    params: p3.Params,
-    res: p3.Result,
-    wcs_done: list[dict[str, Any]],
-    figures: dict[str, go.Figure],
-    prof: pd.DataFrame | None,
-) -> None:
+def grid_table(res: p3.Result) -> pd.DataFrame:
+    """Every cell with its zone, surface and per layer the heads and the rise."""
     labels = res.node_labels
     gx, gy = np.meshgrid(res.x, res.y)
     grid = pd.DataFrame({"x [m]": gx.ravel(), "y [m]": gy.ravel()})
@@ -322,7 +364,17 @@ def show_export(
         grid[f"h ref {labels[k]} [m NAP]"] = res.heads_ref[j].ravel()
         grid[f"h opzet {labels[k]} [m NAP]"] = res.heads_new[j].ravel()
         grid[f"verhoging {labels[k]} [m]"] = res.rise[j].ravel()
-    csv_button(grid, "peilopzet2d_rooster.csv", "Rooster (CSV)")
+    return grid
+
+
+def show_export(
+    params: p3.Params,
+    res: p3.Result,
+    wcs_done: list[dict[str, Any]],
+    figures: dict[str, go.Figure],
+    out: dict[str, Any],
+) -> None:
+    csv_button(lambda: grid_table(res), "peilopzet2d_rooster.csv", "Rooster (CSV)")
     csv_button(
         res.budget.reset_index(names="post"), "peilopzet2d_waterbalans.csv", "Waterbalans (CSV)"
     )
@@ -353,7 +405,11 @@ def show_export(
             pd.DataFrame(
                 [
                     {"watergang": f"{g.name} ({kind})", "rij": r, "kolom": c}
-                    for kind, grp in (("put", params.wells), ("GHB", params.ghb))
+                    for kind, grp in (
+                        ("put", params.wells),
+                        ("GHB", params.ghb),
+                        ("CHD", params.chd),
+                    )
                     for g in grp
                     for r, c in g.cells
                 ],
@@ -363,9 +419,26 @@ def show_export(
         ignore_index=True,
     )
     csv_button(cells, "peilopzet2d_cellen.csv", "Getekende cellen (CSV)")
-    if prof is not None:
-        csv_button(prof.round(4), "peilopzet2d_profiel.csv", "Dwarsprofiel (CSV)")
+    if out.get("prof") is not None:
+        csv_button(lambda: out["prof"].round(4), "peilopzet2d_profiel.csv", "Dwarsprofiel (CSV)")
     png_buttons(figures, KEY)
+    st.markdown("**GIS (QGIS)**")
+    located = not (params.origin_x == 0.0 and params.origin_y == 0.0)
+    wc_lines = {wc["name"]: wc.get("lines", []) for wc in wcs_done}
+    st.download_button(
+        "GIS-bestand (GeoPackage)", lambda: to_gpkg(params, res, wc_lines),
+        file_name="grondwatertoolbox.gpkg", mime="application/geopackage+sqlite3",
+        icon=":material/map:", key=f"{KEY}_gpkg", disabled=not located, on_click="ignore",
+    )  # fmt: skip
+    st.caption(
+        "Eén bestand voor QGIS (slepen in het kaartvenster), in RD (EPSG:28992), met de lagen "
+        f"contouren_verhoging (elke {params.threshold * 100:.0f} cm per rekenlaag; negatief = "
+        "verlaging; grens = 1 voor de beoordelingsgrens), modelgebied, watergangen (lijnen en "
+        "rekencellen), putten, ghb_chd en damwanden."
+        if located
+        else "Zet bij stap 1 een locatie aan: zonder RD-coördinaten komt het bestand op de "
+        "verkeerde plek in QGIS."
+    )
     st.markdown("**MODFLOW 6-model**")
     st.caption(
         "Dezelfde berekening als invoerbestanden voor MODFLOW 6 (referentie en opzet, met een "
@@ -398,12 +471,13 @@ def result_tabs(done: dict[str, Any] | None, fig_draw: go.Figure) -> None:
         for tab in (t_res, t_val, t_exp):
             tab.info(NO_RESULT)
         return
+    out = ss.setdefault(f"{KEY}_out", {})
     with t_res:
-        fig_res, fig_prof, prof = show_result(done["params"], done["res"], done["wcs"])
+        result_panel(done["params"], done["res"], done["wcs"], out)
     with t_val:
         show_validation(done["params"], done["res"])
     with t_exp:
-        figs = {"peilopzet2d_kaart": fig_res, "peilopzet2d_tekening": fig_draw}
-        if fig_prof is not None:
-            figs["peilopzet2d_profiel"] = fig_prof
-        show_export(done["params"], done["res"], done["wcs"], figs, prof)
+        figs = {"peilopzet2d_kaart": out["fig_res"], "peilopzet2d_tekening": fig_draw}
+        if out["fig_prof"] is not None:
+            figs["peilopzet2d_profiel"] = out["fig_prof"]
+        show_export(done["params"], done["res"], done["wcs"], figs, out)

@@ -10,6 +10,7 @@ from typing import Any
 from grid_ui import centre_key, outline_lines, to_cells, wc_geometry
 
 NEW = "__nieuw__"
+GROUPS = {"put": "wells", "ghb": "ghb", "chd": "chd"}  # drawing object -> session list
 
 
 def new_zone(state: MutableMapping[str, Any], key: str) -> int:
@@ -34,9 +35,9 @@ def apply_selection(
 ) -> None:
     """Apply a box/lasso selection to the chosen object.
 
-    ``obj``: watergang, drain, put, ghb, damwand or zone; ``how``: cellen/wissen
+    ``obj``: watergang, drain, put, ghb, chd, damwand or zone; ``how``: cellen/wissen
     (watergang), rondom (damwand around the selection) or toevoegen/verwijderen; ``target``:
-    watercourse or wall name, or zone id, or :data:`NEW`;
+    watercourse, wall or group name, or zone id, or :data:`NEW` (None for a group: new);
     ``grid``: (cell, nrow, ncol)."""
     cell, nrow, ncol = grid
     wcs = state[f"{key}_wcs"]
@@ -59,9 +60,11 @@ def apply_selection(
             state[f"{key}_drain"] |= selected
         else:
             state[f"{key}_drain"] -= selected
-    elif obj in ("put", "ghb"):
-        name = "wells" if obj == "put" else "ghb"
-        if how == "toevoegen":
+    elif obj in GROUPS:
+        name = GROUPS[obj]
+        if how == "toevoegen" and target not in (None, NEW):
+            next(g for g in state[f"{key}_{name}"] if g["name"] == target)["points"] |= selected
+        elif how == "toevoegen":
             state[f"{key}_{name}"].append({**props, "points": set(selected)})
         else:
             for g in state[f"{key}_{name}"]:

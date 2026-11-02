@@ -185,9 +185,9 @@ def test_invalid_model_input(change: dict, fragment: str) -> None:
 def test_too_many_aquifers_rejected() -> None:
     stack = LayerStack(
         "deklaag",
-        build_layers("deklaag", [(10.0, 10.0)] * 5, [(2.0, 500.0, 0.05)] * 5),
+        build_layers("deklaag", [(10.0, 10.0)] * 7, [(2.0, 500.0, 0.05)] * 7),
     )
-    with pytest.raises(ParamError, match="4 watervoerende pakketten"):
+    with pytest.raises(ParamError, match="6 watervoerende pakketten"):
         dataclasses.replace(BASE, stack=stack).validate()
 
 
@@ -212,12 +212,23 @@ FOUR_AQ_CLAY = LayerStack(
         [(3.0, 300.0, 0.05), (3.0, 800.0, 0.01), (5.0, 2000.0, 0.01), (4.0, 5000.0, 0.01)],
     ),
 )  # fmt: skip
+SIX_AQ_CLAY = LayerStack(
+    "deklaag",
+    build_layers(
+        "deklaag",
+        [(20.0, 15.0), (15.0, 20.0), (30.0, 25.0), (20.0, 10.0), (25.0, 30.0), (40.0, 20.0)],
+        [(3.0, 300.0, 0.05), (3.0, 800.0, 0.01), (5.0, 2000.0, 0.01), (4.0, 5000.0, 0.01),
+         (5.0, 3000.0, 0.01), (6.0, 10000.0, 0.01)],
+    ),
+)  # fmt: skip
 
 
-@pytest.mark.parametrize("stack", [THREE_AQ, FOUR_AQ, FOUR_AQ_CLAY], ids=["3fz", "4fz", "4dk"])
+@pytest.mark.parametrize(
+    "stack", [THREE_AQ, FOUR_AQ, FOUR_AQ_CLAY, SIX_AQ_CLAY], ids=["3fz", "4fz", "4dk", "6dk"]
+)
 def test_many_aquifers_match_multilayer_analytic(stack: LayerStack) -> None:
     """Strip benchmark against the analytic multilayer solution (eigenvalue method) for 3
-    and 4 aquifers; with the grid correction within 2 % at 25 m (measured: < 0.6 %)."""
+    to 6 aquifers; with the grid correction within 2 % at 25 m (measured: < 0.6 %)."""
     q_num, q_an = p3.strip_benchmark(stack, 25.0, correction=True)
     assert q_num == pytest.approx(q_an, rel=0.02)
 
@@ -235,6 +246,27 @@ def test_four_aquifers_with_all_boundaries_balance() -> None:
     assert res.heads_ref.shape[0] == 5
     assert max(res.mass_balance.values()) < 1e-8
     assert res.well_drawdown is not None and res.well_drawdown[-1, 20, 20] > 0
+
+
+def test_six_aquifers_balance_and_seven_rejected() -> None:
+    """The maximum of 6 aquifers (7 nodes with the deklaag) computes with a closed balance;
+    a 7th aquifer gives a clear message."""
+    nodes = SIX_AQ_CLAY.nodes
+    par = dataclasses.replace(
+        BASE, stack=SIX_AQ_CLAY, boundary="per_laag",
+        boundary_layers=(-1.0, None, -1.2, None, -1.5, -1.6, None),
+        wells=(p3.WellGroup("Putten", ((20, 20),), nodes[-1].key, 0.0, 400.0),),
+    )  # fmt: skip
+    res = p3.compute(par)
+    assert res.heads_ref.shape[0] == 7
+    assert max(res.mass_balance.values()) < 1e-8
+    assert res.well_drawdown is not None and res.well_drawdown[-1, 20, 20] > 0
+    seven = LayerStack(
+        "deklaag",
+        build_layers("deklaag", [(10.0, 10.0)] * 7, [(2.0, 500.0, 0.01)] * 7),
+    )
+    with pytest.raises(ParamError, match="Maximaal 6 pakketten"):
+        dataclasses.replace(BASE, stack=seven).validate()
 
 
 def test_invalid_watercourse_rejected() -> None:
@@ -270,6 +302,22 @@ def test_largest_model_is_valid_and_too_large_rejected() -> None:
 def test_largest_grid_with_four_aquifers_is_fast_enough() -> None:
     """100 x 100 cells x 5 nodes (deklaag + 4 aquifers) = 50 000 unknowns."""
     par = dataclasses.replace(fine_params(), stack=FOUR_AQ_CLAY, wells=())
+    t0 = time.perf_counter()
+    res = p3.compute(par)
+    assert time.perf_counter() - t0 < 3.0
+    assert max(res.mass_balance.values()) < 1e-8
+
+
+def test_largest_grid_with_six_aquifers_is_fast_enough() -> None:
+    """Deklaag + 6 aquifers = 7 nodes: at most 75 x 75 cells (here 10 m), with wells; a
+    larger grid is refused with the limit for this number of layers."""
+    with pytest.raises(ParamError, match="maximaal 75 cellen per zijde bij 7 rekenlagen"):
+        dataclasses.replace(fine_params(), stack=SIX_AQ_CLAY).validate()
+    side = 75 * 10.0
+    par = dataclasses.replace(
+        fine_params(), stack=SIX_AQ_CLAY, size_x=side, size_y=side,
+        watercourses=p3.default_watercourses(side, side, 10.0),
+    )  # fmt: skip
     t0 = time.perf_counter()
     res = p3.compute(par)
     assert time.perf_counter() - t0 < 3.0

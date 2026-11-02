@@ -30,6 +30,7 @@ import numpy as np
 from gwproducten.numeric.grid2d import (
     Barrier,
     Convertible,
+    FixedHeads,
     FluxBoundary,
     GridSolution,
     HeadBoundary,
@@ -184,10 +185,11 @@ def build(
     workspace: Path,
     newton: bool = False,
     barriers: list[Barrier] = (),  # type: ignore[assignment]
+    fixed_cells: list[FixedHeads] = (),  # type: ignore[assignment]
 ) -> tuple[object, list[int], dict[str, str]]:
-    """Write the MF6 simulation for one run (the app's boundary groups, wells, fixed ring and
-    walls). Returns the simulation, the MF6 layer of every app node and package name -> group
-    name."""
+    """Write the MF6 simulation for one run (the app's boundary groups, wells, fixed ring, CHD
+    groups and walls; a CHD group replaces the ring where they meet). Returns the simulation,
+    the MF6 layer of every app node and package name -> group name."""
     import flopy
 
     nl, nr, nc = len(params.stack.nodes), params.nrow, params.ncol
@@ -237,16 +239,23 @@ def build(
         names[pname.upper()] = w.name
         data = [(cell(key), float(q)) for key, q in zip(w.keys, w.rate, strict=True)]
         flopy.mf6.ModflowGwfwel(gwf, stress_period_data=data, pname=pname, filename=pname)
+    held = {int(key) for g in fixed_cells for key in g.keys}
     chd = [
         ((node_layer[n], r, col), head)
         for n, head in enumerate(fixed)
         if head is not None
         for r in range(nr)
         for col in range(nc)
-        if r in (0, nr - 1) or col in (0, nc - 1)
+        if (r in (0, nr - 1) or col in (0, nc - 1))
+        and int(np.ravel_multi_index((n, nr - 1 - r, col), (nl, nr, nc))) not in held
     ]
     if chd:
         flopy.mf6.ModflowGwfchd(gwf, stress_period_data=chd, pname="chd")
+    for k, g in enumerate(fixed_cells, start=len(boundaries) + len(fluxes)):
+        pname = _pname(k, g.name)
+        names[pname.upper()] = g.name
+        data = [(cell(key), float(h)) for key, h in zip(g.keys, g.head, strict=True)]
+        flopy.mf6.ModflowGwfchd(gwf, stress_period_data=data, pname=pname, filename=pname)
     hfb = []
     thin = params.stack.top_mode == "deklaag"
     for bar in barriers:
@@ -292,6 +301,7 @@ def solve(
     convertible: list[Convertible | None],
     workspace: Path,
     barriers: list[Barrier] = (),  # type: ignore[assignment]
+    fixed_cells: list[FixedHeads] = (),  # type: ignore[assignment]
 ) -> tuple[GridSolution, bool]:
     """One run with MODFLOW 6, as a :class:`GridSolution` (same fields as the app's solver).
     First the standard formulation (identical to the app); with dry cells or no convergence
@@ -299,7 +309,9 @@ def solve(
     nl, nr, nc = len(params.stack.nodes), params.nrow, params.ncol
     for newton in (False, True):
         ws = workspace / ("newton" if newton else "standaard")
-        sim, node_layer, names = build(params, boundaries, fluxes, fixed, ws, newton, barriers)
+        sim, node_layer, names = build(
+            params, boundaries, fluxes, fixed, ws, newton, barriers, fixed_cells
+        )
         sim.write_simulation(silent=True)
         ok, _ = sim.run_simulation(silent=True)
         if not ok:
@@ -362,7 +374,7 @@ def _build_stage(params: p3.Params, stage: str, workspace: Path, newton: bool = 
         boundaries.append(ring)
     return build(
         params, boundaries, p3._wells(params, sub, stage), p3._fixed_head(params), workspace,
-        newton, p3._barriers(params, stage),
+        newton, p3._barriers(params, stage), p3._fixed_cells(params, sub, stage),
     )  # fmt: skip
 
 
@@ -382,10 +394,11 @@ Lagen (van boven naar beneden):
 Eenheden: meter en dag. Rooster: {nrow} rijen x {ncol} kolommen, cel {cell:g} m; rij 1 is
 de noordrand van de app-kaart (zoals gebruikelijk in MODFLOW 6). {origin}
 Neerslag {recharge:g} m/d.
-Watergangen (RIV), drains (DRN), GHB-groepen en putten (WEL) staan elk in een eigen pakket,
-genoemd naar de groep in de app. Damwanden staan in het HFB-pakket (hydraulische
-karakteristiek 1/c_w; 0 = ondoorlatend). De conductances zijn door de app berekend (Ernst met
-kv/kh, celgrootte-correctie De Lange). Transmissiviteit: {conv}.
+Watergangen (RIV), drains (DRN), GHB-groepen, putten (WEL) en CHD-groepen staan elk in een
+eigen pakket, genoemd naar de groep in de app; de vaste modelrand staat in het pakket chd.
+Damwanden staan in het HFB-pakket (hydraulische karakteristiek 1/c_w; 0 = ondoorlatend). De
+conductances zijn door de app berekend (Ernst met kv/kh, celgrootte-correctie De Lange).
+Transmissiviteit: {conv}.
 """
 
 

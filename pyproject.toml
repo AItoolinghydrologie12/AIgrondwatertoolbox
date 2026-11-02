@@ -15,6 +15,7 @@ dependencies = [
     "plotly==7.1.0",
     "requests==2.34.2",  # map data (PDOK, REGIS) for a model location
     "pillow==13.0.0",  # background maps and AHN raster (already installed with streamlit)
+    "contourpy==1.4.0",  # contour lines for the GIS export (already installed with matplotlib)
 ]
 
 [project.optional-dependencies]

@@ -179,7 +179,7 @@ Getoetst tegen de analytische meerlagenoplossing (lange evenwijdige watergangen,
 met correctie binnen 0,6 % voor 2, 3 en 4 pakketten, ook onder een deklaag; zonder
 correctie +3 % (freatisch zand) tot +54 % (deklaag met 4 pakketten).
 
-## Putten, GHB en kwel
+## Putten, GHB, CHD en kwel
 
 **Putten (WEL).** Een putgroep is een set cellen in één rekenlaag met per put een vast debiet
 $Q$ [m³/d], apart voor referentie en opzet. Positief $Q$ = onttrekking (verlaging), negatief
@@ -231,6 +231,23 @@ $$
 
 altijd actief (in- en uitstroom). Bruikbaar voor een boezem of kanaal met een vast peil, een
 plas, of een leiding die niet als watergang getekend wordt.
+
+**Vaste stijghoogte (CHD).** Een CHD-groep is een set cellen in één rekenlaag waar de
+stijghoogte vastligt op $h_\text{chd}$ (referentie en opzet apart), zoals het CHD-pakket van
+MODFLOW 6. Het is een GHB zonder weerstand ($c_\text{ghb} \to 0$): de cel neemt zoveel water
+op of geeft zoveel af als nodig is om $h = h_\text{chd}$ te houden. Dat debiet volgt uit de
+balans van de cel,
+
+$$
+Q_\text{chd} = \sum_\text{buren} C\,(h_\text{chd} - h_\text{buur}) ,
+$$
+
+positief = water het grondwater in, en staat per groep in de waterbalans. Net als bij de vaste
+modelrand werken neerslag, watergangen, drains, GHB en putten niet in een CHD-cel van dezelfde
+laag: hun water zou direct in de vaste stijghoogte verdwijnen. De app waarschuwt als zo'n
+object in een CHD-cel ligt. Bruikbaar voor een groot open water of een rand binnen het model
+waar de stijghoogte bekend is; let op dat een CHD onbeperkt water levert. Valideer met een
+GHB met een heel kleine weerstand: die geeft dezelfde stijghoogten.
 
 **Kwel/wegzijging via de onderrand.** Onder de onderste rekenlaag ligt een diep pakket met
 stijghoogte $\varphi$ [m NAP], gescheiden door een laag met weerstand $c_\text{kwel}$ [d].
@@ -307,9 +324,10 @@ lekkende wand gelijk aan de onttrekking min de neerslag binnen de wand; gelijk a
 ## Resultaat
 
 - stijghoogte per laag (referentie en opzet) en de grondwaterstand t.o.v. maaiveld;
-- verhoging = opzet − referentie, met de 5 cm-contour;
-- waterbalans per run: neerslag, watergangen (per watergang), putgroepen, GHB-groepen, kwel
-  onderrand, buisdrainage, maaiveld, rand;
+- verhoging = opzet − referentie, met de 5 cm-contour voor verhoging (rood) en voor
+  verlaging (blauw: negatieve verhoging, bijv. bij een bemaling);
+- waterbalans per run: neerslag, watergangen (per watergang), putgroepen, GHB-groepen,
+  CHD-groepen, kwel onderrand, buisdrainage, maaiveld, rand;
 - verlaging door de putten (als er putten zijn);
 - aantal cellen waar het grondwater boven maaiveld komt (maaivelddrainage actief).
 
@@ -317,8 +335,10 @@ lekkende wand gelijk aan de onttrekking min de neerslag binnen de wand; gelijk a
 
 - **Stationair**. Transmissiviteit standaard volgens de natte dikte; de verticale weerstand
   rekent met de volle laagdikte.
-- **Ondergrond**: basis plus maximaal 5 zones met dezelfde laagstructuur; maximaal 4
-  watervoerende pakketten. Een sprong in de lagenopbouw ligt op een celgrens; binnen een cel
+- **Ondergrond**: basis plus maximaal 5 zones met dezelfde laagstructuur; maximaal 6
+  watervoerende pakketten. Bij meer dan 5 rekenlagen is het rooster kleiner (6 rekenlagen:
+  85 × 85 cellen, 7: 75 × 75), zodat rekentijd en geheugen gelijk blijven aan 100 × 100
+  cellen met 5 rekenlagen. Een sprong in de lagenopbouw ligt op een celgrens; binnen een cel
   is de ondergrond uniform.
 - **Celgrootte**: een watergang zit midden in de cel. Kleiner dan de cel kan hij niet
   liggen. Bij spreidingslengtes kleiner dan de cel (bijv. een kleiige deklaag) is de
@@ -335,6 +355,8 @@ lekkende wand gelijk aan de onttrekking min de neerslag binnen de wand; gelijk a
   een verlaging van meer dan ~25 % van de dikte. De celstijghoogte bij een put is een
   celgemiddelde.
 - **Kwel-onderrand**: $\varphi$ is vast en gelijk in referentie en opzet.
+- **CHD** levert of neemt onbeperkt water op; controleer in de waterbalans of het debiet
+  realistisch is.
 - **Watergangen** volgen de cellen; kruisingen en bochten zijn gewoon cellen. De
   conductance per cel hangt niet af van de richting van de watergang in de cel.
 - **Damwanden** liggen op celranden (een schuine wand wordt een trap langs de cellen) en

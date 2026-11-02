@@ -1,6 +1,6 @@
 """Save and load a Grondwatertoolbox project as JSON: all inputs (widget values) and everything
-drawn (watercourses, drainage, wells, GHB groups, walls, zones). Works on a plain state mapping so
-it can be tested without Streamlit."""
+drawn (watercourses, drainage, wells, GHB and CHD groups, walls, zones). Works on a plain state
+mapping so it can be tested without Streamlit."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ INPUT_PATTERNS = [
     r"z\d+_(name|mv)",
     r"z\d+_(deklaag|freatisch_zand)_\d+_\d+_(d|k|c|kh|a)",
 ]
-OBJECTS = ("wcs", "drain", "wells", "ghb", "walls", "zones")
+OBJECTS = ("wcs", "drain", "wells", "ghb", "chd", "walls", "zones")
 
 
 def _is_input(name: str, key: str) -> bool:
@@ -109,7 +109,7 @@ def apply_project(state: MutableMapping[str, Any], key: str, data: dict[str, Any
         state[f"{key}_{name}"] = decoded if not isinstance(decoded, tuple) else list(decoded)
     objects = {name: _decode(data["objecten"].get(name, [])) for name in OBJECTS}
     state[f"{key}_drain"] = set(objects["drain"]) if objects["drain"] else set()
-    for name in ("wcs", "wells", "ghb", "walls", "zones"):
+    for name in ("wcs", "wells", "ghb", "chd", "walls", "zones"):
         state[f"{key}_{name}"] = [_fix_object(o) for o in objects[name]]
     state[f"{key}_line"] = []
 

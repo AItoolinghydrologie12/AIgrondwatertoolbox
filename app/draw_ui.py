@@ -1,4 +1,4 @@
-"""Step 2 of the Grondwatertoolbox page: drawing watercourses, drains, wells, GHB, walls
+"""Step 2 of the Grondwatertoolbox page: drawing watercourses, drains, wells, GHB, CHD, walls
 (damwanden) and zones on the grid, and the tables to edit them."""
 
 from __future__ import annotations
@@ -10,11 +10,22 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-from draw_actions import NEW, apply_selection
-from grid_ui import add_background, centre_key, drawing_figure, line_snap, to_cells
+from draw_actions import GROUPS, NEW, apply_selection
+from grid_ui import add_background, centre_key, drawing_figure, line_snap, to_cells, wc_icon
 from location_ui import background, background_caption, background_inputs, model_bbox
-from streamlit.errors import StreamlitAPIException
-from toolbox_state import DEFAULT_RADIUS, KEY, MAP_CONFIG, Grid, bump, example, reset, ss
+from toolbox_state import (
+    DEFAULT_RADIUS,
+    KEY,
+    MAP_CONFIG,
+    Grid,
+    bump,
+    can_undo,
+    example,
+    rerun_fragment,
+    reset,
+    ss,
+    undo,
+)  # fmt: skip
 from water_import_ui import area_outlines, import_inputs, import_notice
 
 from gwproducten.products import peilopzet_grid as p3
@@ -35,6 +46,7 @@ OBJECTS = {
     "drain": "Buisdrainage",
     "put": "Put",
     "ghb": "GHB",
+    "chd": "CHD",
     "damwand": "Damwand",
     "zone": "Zone",
 }
@@ -54,7 +66,13 @@ GROUP_COLUMNS = {
         "name": "Naam", "layer": "Laag", "head_ref": "h ref [m NAP]",
         "head_new": "h opzet [m NAP]", "resistance": "Weerstand c [d]",
     },
+    "chd": {
+        "name": "Naam", "layer": "Laag", "head_ref": "h ref [m NAP]",
+        "head_new": "h opzet [m NAP]",
+    },
 }  # fmt: skip
+GROUP_TITLES = {"wells": "Putgroepen", "ghb": "GHB-groepen", "chd": "CHD-groepen"}
+GROUP_NAMES = {"put": "Putten", "ghb": "GHB", "chd": "CHD"}
 
 
 def props_form(prefix: str, cell: float, surface: float) -> dict[str, Any]:
@@ -97,14 +115,12 @@ def props_form(prefix: str, cell: float, surface: float) -> dict[str, Any]:
 
 
 def group_form(action: str, labels: dict[str, str], surface: float) -> dict[str, Any]:
-    """Properties of a new well group (action "put") or GHB group (action "ghb")."""
-    kind = "wells" if action == "put" else "ghb"
-    n = len(ss[f"{KEY}_{kind}"]) + 1
+    """Properties of a new well group (action "put"), GHB group ("ghb") or fixed-head group
+    ("chd")."""
+    n = len(ss[f"{KEY}_{GROUPS[action]}"]) + 1
     k = f"{KEY}_{action}"
     props: dict[str, Any] = {
-        "name": st.text_input(
-            "Naam", f"Putten {n}" if action == "put" else f"GHB {n}", key=f"{k}_name"
-        ),
+        "name": st.text_input("Naam", f"{GROUP_NAMES[action]} {n}", key=f"{k}_name"),
         "layer": st.selectbox(
             "Laag", list(labels), format_func=labels.get, key=f"{k}_layer",
             index=len(labels) - 1 if action == "put" and labels else 0,
@@ -132,10 +148,17 @@ def group_form(action: str, labels: dict[str, str], surface: float) -> dict[str,
         props["head_new"] = c2.number_input(
             "h opzet [m NAP]", value=surface - 1.2, step=0.05, key=f"{k}_hn"
         )
-        props["resistance"] = st.number_input(
-            "Weerstand c [d]", value=1.0, min_value=0.01, step=0.5, key=f"{k}_c",
-            help="Conductance per cel = celoppervlak / c.",
-        )  # fmt: skip
+        if action == "ghb":
+            props["resistance"] = st.number_input(
+                "Weerstand c [d]", value=1.0, min_value=0.01, step=0.5, key=f"{k}_c",
+                help="Conductance per cel = celoppervlak / c.",
+            )  # fmt: skip
+        else:
+            st.caption(
+                "Vaste stijghoogte (CHD): de cellen houden deze stijghoogte; het debiet volgt "
+                "uit de berekening en staat in de waterbalans. Andere objecten in deze cellen "
+                "(zelfde laag) werken niet."
+            )
     return props
 
 
@@ -218,9 +241,9 @@ def wall_table(labels: dict[str, str], grid: Grid) -> None:
 
 
 def group_tables(labels: dict[str, str]) -> None:
-    """Editable tables of the well and GHB groups."""
+    """Editable tables of the well, GHB and CHD groups."""
     by_label = {v: k for k, v in labels.items()}
-    for kind, title in (("wells", "Putgroepen"), ("ghb", "GHB-groepen")):
+    for kind, title in GROUP_TITLES.items():
         items = ss[f"{KEY}_{kind}"]
         if not items:
             continue
@@ -275,17 +298,21 @@ def watercourse_tables(grid: Grid) -> None:
     table = pd.DataFrame(
         [
             {
+                "Lijn": wc_icon(k),
                 **{WC_COLUMNS[f]: wc[f] for f in WC_COLUMNS},
                 "Cellen": len(v["cells"]),
                 "Totale lengte [m]": round(sum(v["lengths"]), 1),
                 "Verwijderen": False,
             }
-            for wc, v in zip(ss[f"{KEY}_wcs"], wcs_view, strict=True)
+            for k, (wc, v) in enumerate(zip(ss[f"{KEY}_wcs"], wcs_view, strict=True))
         ]
     )
     edited = st.data_editor(
         table, hide_index=True, key=f"{KEY}_table_{ss[f'{KEY}_ver']}", width="stretch",
         column_config={
+            "Lijn": st.column_config.ImageColumn(
+                "Lijn", width="small", help="Kleur en lijnsoort op de tekenkaart"
+            ),
             "Type": st.column_config.SelectboxColumn(options=list(p3.KINDS)),
             "Cellen": st.column_config.NumberColumn(disabled=True),
             "Totale lengte [m]": st.column_config.NumberColumn(disabled=True),
@@ -407,7 +434,9 @@ def draw_step(
         "de lengte per cel volgt uit de lijn) of met rechthoek/lasso als volle cellen. Een "
         "damwand klik je als lijn langs de celranden, of zet je rondom een selectie (bouwput). "
         "Andere objecten: selecteer cellen met rechthoek of lasso (werkbalk rechtsboven) en "
-        "klik *Toepassen*. Lichtere kleur = minder watergang in de cel."
+        "klik *Toepassen*. Elke watergang heeft een eigen kleur op de lijn; de grijze cellen "
+        "eronder zijn de rekencellen: hoe donkerder, hoe meer lengte van de watergang in de "
+        "cel (een lichte cel raakt de lijn maar net en telt naar verhouding weinig mee)."
     )
     draw_panel(grid, values, node_labels, zone_values)
     import_inputs(grid, values)
@@ -416,15 +445,6 @@ def draw_step(
     wall_table(node_labels, grid)
     watercourse_tables(grid)
     return ss[f"{KEY}_fig_draw"]
-
-
-def _rerun_panel() -> None:
-    """Rerun only the drawing panel; Streamlit refuses that during a full-page run (e.g.
-    in tests), and then the whole page reruns."""
-    try:
-        st.rerun(scope="fragment")
-    except StreamlitAPIException:
-        st.rerun()
 
 
 @st.fragment
@@ -441,6 +461,11 @@ def draw_panel(
     col_map, col_ctl = st.columns([3, 2])
     with col_map:
         background_inputs()
+        show_cells = st.checkbox(
+            "Rekencellen van de watergangen tonen", value=False, key=f"{KEY}_show_cells",
+            help="Grijs onder de getekende lijnen: de cellen waarmee het model rekent; hoe "
+            "donkerder, hoe meer lengte van de watergang in de cel.",
+        )  # fmt: skip
     with col_ctl:
         obj = st.radio(
             "Wat teken je?", list(OBJECTS), format_func=OBJECTS.get, horizontal=True,
@@ -463,6 +488,7 @@ def draw_panel(
             )  # fmt: skip
     line_mode = obj in ("watergang", "damwand") and how == "lijn"
     point_mode = obj == "watergang" and how == "aanwijzen"
+    click_mode = obj == "put" and how == "toevoegen"  # one click places a well
     snap = None
     if line_mode:  # a wall follows the grid lines: click the cell corners
         snap = cell if obj == "damwand" else line_snap(cell, values["size_x"], values["size_y"])
@@ -474,8 +500,9 @@ def draw_panel(
         fig_draw = drawing_figure(
             nrow, ncol, cell, wcs_view, grid.drain_cells(),
             current_line=ss[f"{KEY}_line"], snap=snap, wells=grid.groups("wells"),
-            ghbs=grid.groups("ghb"), zones=grid.zones(zone_values),
+            ghbs=grid.groups("ghb"), chds=grid.groups("chd"), zones=grid.zones(zone_values),
             outlines=area_outlines(grid, values), walls=grid.walls(), highlight=pick,
+            show_cells=show_cells,
         )  # fmt: skip
         width, height = ncol * cell, nrow * cell
         bbox = model_bbox(values["origin_x"], values["origin_y"], width, height)
@@ -483,12 +510,13 @@ def draw_panel(
         ss[f"{KEY}_fig_draw"] = fig_draw
         # A stable key keeps zoom and pan between reruns; each selection is used only once
         # (``fresh``) instead of clearing it with a new key.
-        draw_key = f"{KEY}_draw_{'lijn' if line_mode else 'wijs' if point_mode else 'cel'}"
+        mode = "lijn" if line_mode else "wijs" if point_mode else "klik" if click_mode else "cel"
+        draw_key = f"{KEY}_draw_{mode}"
         event = st.plotly_chart(
             fig_draw, key=draw_key, on_select="rerun", config=MAP_CONFIG, width="stretch",
             selection_mode=(
                 ("points",) if line_mode
-                else ("points", "box", "lasso") if point_mode
+                else ("points", "box", "lasso") if point_mode or click_mode
                 else ("box", "lasso")
             ),
         )  # fmt: skip
@@ -507,14 +535,14 @@ def draw_panel(
         pt = picked[-1]
         if not ss[f"{KEY}_line"] or ss[f"{KEY}_line"][-1] != pt:
             ss[f"{KEY}_line"].append(pt)
-        _rerun_panel()  # the line in progress is not part of the model yet
+        rerun_fragment()  # the line in progress is not part of the model yet
     if point_mode and fresh:
         ss[f"{KEY}_used_sel"] = selection_id
         cells = set(to_cells(set(picked), cell, nrow, ncol))
         hits = [v["name"] for v in wcs_view if cells & set(v["cells"])]
         ss[f"{KEY}_wc_hits"] = hits
         ss[f"{KEY}_wc_pick"] = hits[0] if hits else None
-        _rerun_panel()  # show the highlight
+        rerun_fragment()  # show the highlight
 
     with col_ctl:
         wcs = ss[f"{KEY}_wcs"]
@@ -539,7 +567,19 @@ def draw_panel(
             )  # fmt: skip
             if target == NEW:
                 props = wall_form(node_labels)
-        elif obj in ("put", "ghb") and how == "toevoegen":
+        elif click_mode:
+            names = [g["name"] for g in ss[f"{KEY}_wells"]]
+            pending = ss.pop(f"{KEY}_put_target_next", None)  # the group made by the last click
+            if pending in names:
+                ss[f"{KEY}_put_target"] = pending
+            target = st.selectbox(
+                "Putgroep", [NEW, *names], key=f"{KEY}_put_target",
+                format_func=lambda n: "+ nieuwe putgroep" if n == NEW else n,
+                help="Een klik op de kaart zet een put in deze groep; de debieten gelden per put.",
+            )  # fmt: skip
+            if target == NEW:
+                props = group_form(obj, node_labels, values["surface"])
+        elif obj in GROUPS and how == "toevoegen":
             props = group_form(obj, node_labels, values["surface"])
         elif obj == "zone" and how == "toevoegen":
             target = st.selectbox(
@@ -555,10 +595,10 @@ def draw_panel(
             b1, b2 = st.columns(2)
             if b1.button("Laatste punt weg", disabled=not line, key=f"{KEY}_undo"):
                 line.pop()
-                _rerun_panel()
+                rerun_fragment()
             if b2.button("Lijn annuleren", disabled=not line, key=f"{KEY}_cancel"):
                 ss[f"{KEY}_line"] = []
-                _rerun_panel()
+                rerun_fragment()
             if st.button(
                 "Lijn afronden", type="primary", disabled=len(line) < 2, key=f"{KEY}_finish"
             ):
@@ -576,6 +616,17 @@ def draw_panel(
                 ss[f"{KEY}_line"] = []
                 bump()
                 st.rerun()
+        elif click_mode:
+            st.caption(
+                "Klik op een cel om er een put te zetten; meerdere tegelijk met rechthoek of "
+                "lasso (werkbalk rechtsboven)."
+            )
+            if selected:  # applied at once, no "Toepassen"
+                apply_selection(ss, KEY, (cell, nrow, ncol), obj, how, target, props, selected)
+                ss[f"{KEY}_used_sel"] = selection_id
+                ss[f"{KEY}_put_target_next"] = props["name"] if target == NEW else target
+                bump()
+                st.rerun()
         elif not point_mode:
             st.markdown(f"**Selectie: {len(selected)} cellen**")
             if st.button("Toepassen", type="primary", disabled=not selected, key=f"{KEY}_apply"):
@@ -584,7 +635,16 @@ def draw_panel(
                 bump()
                 st.rerun()
         st.divider()
-        b1, b2 = st.columns(2)
+        b0, b1, b2 = st.columns(3)
+        if b0.button(
+            "Ongedaan maken", key=f"{KEY}_undo_draw", icon=":material/undo:",
+            disabled=not can_undo(),
+            help="Zet de tekening terug van vóór de laatste wijziging (tekenen, importeren, "
+            "verwijderen; tot 10 stappen). Na pakket splitsen of een project laden begint het "
+            "opnieuw.",
+        ):  # fmt: skip
+            undo()
+            st.rerun()
         if b1.button("Voorbeeld laden", key=f"{KEY}_ex"):
             reset(example())
             st.rerun()

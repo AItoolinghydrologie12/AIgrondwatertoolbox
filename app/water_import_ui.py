@@ -26,7 +26,7 @@ DEPTH_INPUTS = {  # import_water.DEPTHS key -> (widget key suffix, label)
     "3 - 6 meter": ("t2", "TOP10NL 3–6 m"),
     "breed": ("t3", "Breder / onbekend"),
 }
-DEFAULT_KINDS = ["legger 1"]  # Job: only primary by default, keeps the table readable
+DEFAULT_KINDS = ["legger 1"]  # only primary by default: keeps the table readable
 
 
 @st.cache_data(ttl=24 * 3600, max_entries=20, show_spinner="Watergangen ophalen bij PDOK…")
