@@ -82,29 +82,82 @@ def _png(colour: tuple[int, int, int], size: tuple[int, int] = (256, 256)) -> by
     return buffer.getvalue()
 
 
-def test_wms_request_in_rd_with_model_aspect() -> None:
+def test_background_tiles_cover_bbox_in_rd() -> None:
+    """The RD tile level gives about MAX_PX over the bbox; the tiles cover it exactly."""
     bbox = (136300.0, 455400.0, 138300.0, 456400.0)  # 2 km x 1 km
-    size = pdok.image_size(bbox)
-    assert size == (pdok.MAX_PX, pdok.MAX_PX // 2)
-    params = pdok.wms_params("top10nl", bbox, size, "image/png")
-    assert params["crs"] == "EPSG:28992" and params["version"] == "1.3.0"
-    assert params["bbox"] == "136300.00,455400.00,138300.00,456400.00"  # x, y order in RD
+    assert pdok.image_size(bbox) == (pdok.MAX_PX, pdok.MAX_PX // 2)
+    level = pdok.tile_level(bbox)
+    res = pdok.RD_RES0 / 2**level
+    assert 0.7 < 2000.0 / res / pdok.MAX_PX < 1.42
+    cols, rows = pdok.tile_range(bbox, level)
+    span = res * pdok.TILE_PX
+    x0, y0 = pdok.RD_TILE_ORIGIN
+    assert x0 + cols.start * span <= bbox[0] < x0 + (cols.start + 1) * span
+    assert x0 + cols.stop * span >= bbox[2] > x0 + (cols.stop - 1) * span
+    assert y0 - rows.start * span >= bbox[3] > y0 - (rows.start + 1) * span
+    assert y0 - rows.stop * span <= bbox[1] < y0 - (rows.stop - 1) * span
 
 
-def test_wms_error_document_gives_message(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_background_stitches_tiles_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tiles stitched row by row from the top; the result is a JPEG of the bbox aspect."""
+    import io
+
+    from PIL import Image
+
+    seen = []
+
+    def fake_get(url, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003, ANN202
+        seen.append(url)
+        return FakeResponse(_png((200, 200, 200)))
+
+    monkeypatch.setattr(pdok.requests, "get", fake_get)
+    bbox = (136300.0, 455400.0, 138300.0, 456400.0)
+    data = pdok.background_image("grijs", bbox)
+    image = Image.open(io.BytesIO(data))
+    assert image.format == "JPEG" and image.size == pdok.image_size(bbox)
+    cols, rows = pdok.tile_range(bbox, pdok.tile_level(bbox))
+    assert len(seen) == len(cols) * len(rows)
+    assert all("/grijs/EPSG:28992/" in u for u in seen)
+
+
+def test_background_error_document_gives_message(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_get(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
-        return FakeResponse(b"<ServiceExceptionReport>fout</ServiceExceptionReport>")
+        return FakeResponse(b"<ExceptionReport>fout</ExceptionReport>")
 
     monkeypatch.setattr(pdok.requests, "get", fake_get)
     with pytest.raises(pdok.ServiceError, match="geen afbeelding"):
-        pdok.background_image("top10nl", (136300.0, 455400.0, 137300.0, 456400.0))
+        pdok.background_image("grijs", (136300.0, 455400.0, 137300.0, 456400.0))
 
 
 @pytest.mark.online
-@pytest.mark.parametrize("kind", ["top10nl", "luchtfoto", "ahn"])
-def test_online_background(kind: str) -> None:
-    data = pdok.background_image(kind, (136300.0, 455400.0, 137300.0, 456400.0))
+def test_online_background() -> None:
+    data = pdok.background_image("grijs", (136300.0, 455400.0, 137300.0, 456400.0))
     assert data[:2] == b"\xff\xd8" and 20_000 < len(data) < 600_000  # a real JPEG map
+
+
+# ---- RD <-> WGS84 ---------------------------------------------------------------------------
+def test_rd_wgs84_amersfoort_and_round_trip() -> None:
+    from gwproducten.geo import rd
+
+    lat, lon = rd.rd_to_wgs84(155000.0, 463000.0)
+    assert (lat, lon) == pytest.approx((52.15517440, 5.38720621), abs=1e-9)
+    for x, y in [(13000.0, 380000.0), (250000.0, 600000.0), (136700.0, 455900.0)]:
+        assert rd.wgs84_to_rd(*rd.rd_to_wgs84(x, y)) == pytest.approx((x, y), abs=0.05)
+
+
+@pytest.mark.parametrize(
+    ("x", "y", "lat", "lon"),
+    [
+        (136785.854, 455850.86, 52.09061667, 5.12143155),  # Domplein 21, Utrecht
+        (233553.682, 582376.83, 53.22222947, 6.56334263),  # Groningen
+    ],
+)
+def test_rd_wgs84_against_pdok(x: float, y: float, lat: float, lon: float) -> None:
+    """Points with both coordinates from the PDOK Locatieserver: within about 1 m."""
+    from gwproducten.geo import rd
+
+    assert rd.rd_to_wgs84(x, y) == pytest.approx((lat, lon), abs=1.5e-5)  # ~1 m
+    assert rd.wgs84_to_rd(lat, lon) == pytest.approx((x, y), abs=1.5)
 
 
 # ---- AHN surface level ----------------------------------------------------------------------

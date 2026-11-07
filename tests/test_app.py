@@ -592,15 +592,16 @@ def test_grid_product_location_sets_rd_origin() -> None:
 
 
 def test_grid_product_location_map_click_moves_centre() -> None:
-    """The location map shows the model area around the centre; a click (handed over as the
-    pending point, as the map does) moves the centre there, within the RD range."""
+    """The location map (folium tiles) shows the model area around the centre; a click
+    (handed over as the pending point, as the map does) moves the centre there, within the
+    RD range."""
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
     at = _toolbox(page, 120)
     at.toggle(key="p3_geo").set_value(True).run()
     at.number_input(key="p3_cx").set_value(136800.0).run()
     at.number_input(key="p3_cy").set_value(455900.0).run()
-    charts = [c for c in at.get("plotly_chart") if '"modelgebied"' in c.proto.spec]
-    assert len(charts) == 1
+    maps = [m for m in at.get("component_instance") if "modelgebied" in str(m.proto)]
+    assert len(maps) == 1 and "brt-achtergrondkaart" in str(maps[0].proto)
     at.session_state["p3_loc_next"] = (137012, 456321)
     at.run()
     assert (at.number_input(key="p3_cx").value, at.number_input(key="p3_cy").value) == (
@@ -677,12 +678,11 @@ def test_grid_product_background_map(monkeypatch: pytest.MonkeyPatch) -> None:
     at = _toolbox(page, 120)
     at.toggle(key="p3_geo").set_value(True).run()
     at.number_input(key="p3_cx").set_value(120500.0).run()
-    at.selectbox(key="p3_bg").set_value("luchtfoto").run()
-    at.button(key="p3_calc").click().run()
+    at.button(key="p3_calc").click().run()  # PDOK grijs is the default with a location
     assert not at.exception, [e.value for e in at.exception]
-    assert ("luchtfoto", (120000.0, 462500.0, 121000.0, 463500.0)) in seen
+    assert ("grijs", (120000.0, 462500.0, 121000.0, 463500.0)) in seen
     assert at.session_state["p3_fig_draw"].layout.images[0].source.startswith("data:image/jpeg")
-    assert any("Beeldmateriaal" in c.value for c in at.caption)
+    assert any("BRT-Achtergrondkaart grijs" in c.value for c in at.caption)
 
 
 def test_grid_product_top10nl_import(monkeypatch: pytest.MonkeyPatch) -> None:
