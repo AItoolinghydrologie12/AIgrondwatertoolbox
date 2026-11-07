@@ -52,10 +52,17 @@ with st.sidebar.expander("Model en rand", expanded=True):
     st.caption("De modelrand en kwel stel je in bij stap 1.")
 project_box = st.sidebar.expander("Project opslaan of laden", expanded=False)
 with st.sidebar.expander("Beoordeling en numeriek", expanded=False):
-    values["threshold"] = number(p3.Params, "threshold", DEFAULTS.threshold, f"{KEY}_thr", 0.01)
+    values["threshold"] = number(
+        p3.Params, "threshold", DEFAULTS.threshold, f"{KEY}_thr", 0.01,
+        help="Beoordelingsgrens voor verhoging en verlaging (0,05 m = 5 cm). Bepaalt de "
+        "dikke grenslijnen op de kaart en het oppervlak in de kerngetallen; de berekening "
+        "zelf verandert niet.",
+    )  # fmt: skip
     values["grid_correction"] = st.checkbox(
-        "Celgrootte-correctie (De Lange-principe)", value=True, key=f"{KEY}_gc"
-    )
+        "Celgrootte-correctie (De Lange-principe)", value=True, key=f"{KEY}_gc",
+        help="Corrigeert de uitwisseling tussen watergang en grondwater voor de celgrootte, "
+        "zodat grove cellen dezelfde infiltratie geven als een fijn rooster. Laat aan.",
+    )  # fmt: skip
     values["convertible"] = st.checkbox(
         "Transmissiviteit volgt de natte dikte (zoals MODFLOW 6 'convertible')",
         value=True,

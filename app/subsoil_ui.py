@@ -245,7 +245,7 @@ def _boundary_inputs(values: dict[str, Any], stack: LayerStack) -> None:
                     ss[kind_key] = "gesloten"  # project saved with the old on/off switch
                 kind = c1.selectbox(
                     f"Rand {node.label}", p3.RING_KINDS, key=kind_key,
-                    format_func=BOUNDARY_LABEL.get,
+                    format_func=BOUNDARY_LABEL.get, help=BOUNDARY_HELP,
                 )  # fmt: skip
                 head = c2.number_input(
                     f"Stijghoogte rand {node.label} [m NAP]", -50.0, 50.0,

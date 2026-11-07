@@ -41,8 +41,11 @@ def page_header(product_meta: dict[str, Any]) -> None:
     )
 
 
-def number(cls: Any, name: str, default: Any, key: str, step: float | None = None) -> Any:
-    """Number input with label, unit, range and help from the dataclass metadata."""
+def number(
+    cls: Any, name: str, default: Any, key: str, step: float | None = None, help: str | None = None
+) -> Any:
+    """Number input with label, unit, range and help from the dataclass metadata (``help``
+    replaces the help of the metadata)."""
     m = meta(cls, name)
     label = f"{m['label']} [{m['unit']}]" if m["unit"] not in ("", "-") else m["label"]
     if isinstance(default, int) and not isinstance(default, bool):
@@ -56,7 +59,7 @@ def number(cls: Any, name: str, default: Any, key: str, step: float | None = Non
         max_value=None if m["max"] is None else float(m["max"]),
         step=step,
         format="%g",
-        help=m["help"] or None,
+        help=help or m["help"] or None,
         key=key,
     )
 

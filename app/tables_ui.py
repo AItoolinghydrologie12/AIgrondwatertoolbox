@@ -21,16 +21,17 @@ DELETE = "Verwijderen"
 class Col:
     """One table column.
 
-    ``kind``: "text", "number", "bool", "select" (``options`` = stored values) or "layer"
-    (stored as layer key, shown as layer label). ``value``: for a read-only column computed
-    from (index, object); else the column shows ``obj[field]`` (``default`` when missing).
+    ``kind``: "text", "number", "bool", "select" (``choices``: stored value -> shown text) or
+    "layer" (stored as layer key, shown as the layer label of the table). ``value``: for a
+    read-only column computed from (index, object); else the column shows ``obj[field]``
+    (``default`` when missing).
     ``fmt``: printf-style display format of a number column (display only).
     """
 
     field: str
     label: str
     kind: str = "number"
-    options: tuple[Any, ...] = ()
+    choices: dict[str, str] | None = None
     readonly: bool = False
     default: Any = None
     fmt: str | None = None
@@ -39,23 +40,28 @@ class Col:
     image: bool = False
 
 
+def _choices(col: Col, labels: dict[str, str]) -> dict[str, str] | None:
+    """Stored value -> shown text of a choice column (None for other kinds)."""
+    if col.kind == "layer":
+        return labels
+    return col.choices if col.kind == "select" else None
+
+
 def _shown(col: Col, k: int, obj: dict[str, Any], labels: dict[str, str]) -> Any:
     if col.value is not None:
         return col.value(k, obj)
     v = obj.get(col.field, col.default)
-    return labels.get(v, v) if col.kind == "layer" else v
+    choices = _choices(col, labels)
+    return choices.get(v, v) if choices else v
 
 
 def _config(col: Col, labels: dict[str, str]) -> Any:
     if col.image:
         return st.column_config.ImageColumn(col.label, width="small", help=col.help)
-    if col.kind == "layer":
+    choices = _choices(col, labels)
+    if choices is not None:
         return st.column_config.SelectboxColumn(
-            col.label, options=list(labels.values()), help=col.help, required=True
-        )
-    if col.kind == "select":
-        return st.column_config.SelectboxColumn(
-            col.label, options=list(col.options), help=col.help, required=True
+            col.label, options=list(choices.values()), help=col.help, required=True
         )
     if col.kind == "bool":
         return st.column_config.CheckboxColumn(col.label, help=col.help, disabled=col.readonly)
@@ -77,7 +83,6 @@ def object_table(
     """Editable table of ``items`` (the list in ``st.session_state[state_key]``). Changed
     values are written back into the dicts; ticked rows are removed (with a rerun)."""
     labels = labels or {}
-    by_label = {v: k for k, v in labels.items()}
     table = pd.DataFrame(
         [
             {**{c.label: _shown(c, k, obj, labels) for c in cols}, DELETE: False}
@@ -94,10 +99,11 @@ def object_table(
             if c.readonly or c.value is not None:
                 continue
             v = row[c.label]
-            if c.kind == "text" or c.kind == "select":
+            choices = _choices(c, labels)
+            if choices is not None:  # shown text -> stored value
+                obj[c.field] = {t: s for s, t in choices.items()}.get(v, v)
+            elif c.kind == "text":
                 obj[c.field] = v
-            elif c.kind == "layer":
-                obj[c.field] = by_label.get(v, v)
             elif c.kind == "bool":
                 obj[c.field] = bool(v)
             else:
