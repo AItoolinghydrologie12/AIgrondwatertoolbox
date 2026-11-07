@@ -11,6 +11,7 @@ from toolbox_state import DEFAULTS, KEY, bump, clear_undo, ss
 from ui_common import number, stack_inputs, zone_stack_inputs
 
 from gwproducten.core.layers import SPLIT_RESISTANCE, SPLIT_THICKNESS, LayerStack, split_aquifer
+from gwproducten.core.params import meta
 from gwproducten.products import peilopzet_grid as p3
 
 BOUNDARY_LABEL = {
@@ -24,6 +25,33 @@ BOUNDARY_HELP = (
     "pakket loopt buiten het model door; de rand watert af naar het randpeil met de weerstand "
     "van een half oneindig lekkend pakket (spreidingslengte λ). Gesloten: geen stroming."
 )
+
+
+def size_input(name: str, key: str, size_max: float) -> float:
+    """Model width/height whose maximum follows the cell size; an old value above the new
+    maximum is clipped instead of raising a widget error."""
+    m = meta(p3.Params, name)
+    ss.setdefault(key, float(getattr(DEFAULTS, name)))
+    ss[key] = min(float(ss[key]), size_max)
+    return st.number_input(
+        f"{m['label']} [{m['unit']}]", float(m["min"]), size_max, step=25.0, format="%g",
+        key=key,
+    )  # fmt: skip
+
+
+def model_area_inputs(values: dict[str, Any]) -> None:
+    """Cell size, width and height of the model; fills ``values``."""
+    values["cell"] = number(p3.Params, "cell", DEFAULTS.cell, f"{KEY}_cell", 5.0)
+    size_max = p3.MAX_CELLS_PER_SIDE * values["cell"]
+    for name, k in (("size_x", "sx"), ("size_y", "sy")):
+        values[name] = size_input(name, f"{KEY}_{k}", size_max)
+    st.caption(
+        f"Maximaal {p3.MAX_CELLS_PER_SIDE} × {p3.MAX_CELLS_PER_SIDE} cellen: bij "
+        f"{values['cell']:g} m is het model hooguit {size_max:g} m breed en hoog. Bij veel "
+        "lagen minder: "
+        + ", ".join(f"{n} rekenlagen {m} × {m}" for n, m in p3.MAX_CELLS_BY_NODES.items())
+        + "."
+    )
 
 
 def zone_inputs(base: LayerStack) -> dict[int, tuple[LayerStack, float]]:

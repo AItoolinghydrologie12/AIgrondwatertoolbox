@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
-import time
 from typing import Any
 
 import streamlit as st
@@ -16,11 +15,12 @@ from engine_ui import mf6_status, run
 from location_ui import location_inputs
 from project_io import apply_project, parse_project, to_json
 from result_ui import result_tabs
-from subsoil_ui import subsoil_step
+from status_ui import calc_status
+from subsoil_ui import model_area_inputs, subsoil_step
 from toolbox_state import DEFAULTS, KEY, Grid, build_params, checkpoint, clear_undo, reset, ss
 from ui_common import number, page_header, show_param_error
 
-from gwproducten.core.params import ParamError, meta
+from gwproducten.core.params import ParamError
 from gwproducten.products import peilopzet_grid as p3
 
 STEPS = ["1 · Ondergrond en maaiveld", "2 · Watergangen tekenen", "3 · Berekenen en resultaat"]
@@ -40,18 +40,6 @@ if _pending is not None:  # loaded in the previous run, applied before the widge
 checkpoint()  # the drawing before any change in this run ("Ongedaan maken")
 
 
-def size_input(name: str, key: str, size_max: float) -> float:
-    """Model width/height whose maximum follows the cell size; an old value above the new
-    maximum is clipped instead of raising a widget error."""
-    m = meta(p3.Params, name)
-    ss.setdefault(key, float(getattr(DEFAULTS, name)))
-    ss[key] = min(float(ss[key]), size_max)
-    return st.number_input(
-        f"{m['label']} [{m['unit']}]", float(m["min"]), size_max, step=25.0, format="%g",
-        key=key,
-    )  # fmt: skip
-
-
 # ---- zijbalk: rekenen, model en numeriek ----------------------------------------------
 clicked = st.sidebar.button(
     "Bereken", type="primary", icon=":material/play_arrow:", key=f"{KEY}_calc_side",
@@ -60,17 +48,7 @@ clicked = st.sidebar.button(
 status_side = st.sidebar.empty()
 values: dict[str, Any] = {}
 with st.sidebar.expander("Model en rand", expanded=True):
-    values["cell"] = number(p3.Params, "cell", DEFAULTS.cell, f"{KEY}_cell", 5.0)
-    size_max = p3.MAX_CELLS_PER_SIDE * values["cell"]
-    for name, k in (("size_x", "sx"), ("size_y", "sy")):
-        values[name] = size_input(name, f"{KEY}_{k}", size_max)
-    st.caption(
-        f"Maximaal {p3.MAX_CELLS_PER_SIDE} × {p3.MAX_CELLS_PER_SIDE} cellen: bij "
-        f"{values['cell']:g} m is het model hooguit {size_max:g} m breed en hoog. Bij veel "
-        "lagen minder: "
-        + ", ".join(f"{n} rekenlagen {m} × {m}" for n, m in p3.MAX_CELLS_BY_NODES.items())
-        + "."
-    )
+    model_area_inputs(values)
     st.caption("De modelrand en kwel stel je in bij stap 1.")
 project_box = st.sidebar.expander("Project opslaan of laden", expanded=False)
 with st.sidebar.expander("Beoordeling en numeriek", expanded=False):
@@ -142,34 +120,14 @@ with step3:
 
 calc_error = None
 if clicked and input_error is None and mf6_ok:
-    t0 = time.perf_counter()
     try:
-        ss[f"{KEY}_result"] = {
-            "params": current,
-            "res": run(current),
-            "wcs": wcs_view,
-            "seconds": time.perf_counter() - t0,
-        }
+        ss[f"{KEY}_result"] = {"params": current, "res": run(current), "wcs": wcs_view}
     except ParamError as err:
         input_error = err
     except RuntimeError as err:  # MODFLOW 6 missing or without a solution
         calc_error = str(err)
 
-done = ss.get(f"{KEY}_result")
-if not mf6_ok:
-    status = ("error", mf6_msg)
-elif calc_error is not None:
-    status = ("error", f"Niet berekend: {calc_error}")
-elif done is None:
-    status = ("info", "Nog niet gerekend. Teken de watergangen en klik op **Bereken**.")
-elif current != done["params"]:
-    status = (
-        "warning",
-        "De invoer is gewijzigd: het resultaat hoort bij de vorige berekening. "
-        "Klik op **Bereken** om opnieuw te rekenen.",
-    )
-else:
-    status = ("success", f"Berekend in {done['res'].seconds:.1f} s.")
+status = calc_status(mf6_ok, mf6_msg, calc_error, ss.get(f"{KEY}_result"), current)
 getattr(c_msg, status[0])(status[1])
 getattr(status_side, status[0])(status[1])
 if input_error is not None:

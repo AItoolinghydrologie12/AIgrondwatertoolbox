@@ -13,6 +13,7 @@ import streamlit as st
 from draw_actions import GROUPS, NEW, apply_selection
 from grid_ui import add_background, centre_key, drawing_figure, line_snap, to_cells, wc_icon
 from location_ui import background, background_caption, background_inputs, model_bbox
+from tables_ui import Col, object_table
 from toolbox_state import (
     DEFAULT_RADIUS,
     KEY,
@@ -195,45 +196,22 @@ def wall_table(labels: dict[str, str], grid: Grid) -> None:
     walls = ss.get(f"{KEY}_walls", [])
     if not walls:
         return
-    by_label = {v: k for k, v in labels.items()}
+    faces = [len(v["faces"]) for v in grid.walls()]
     st.markdown("**Damwanden** (direct te bewerken)")
-    table = pd.DataFrame(
+    object_table(
+        walls,
         [
-            {
-                "Naam": w["name"], "Tot en met laag": labels.get(w["layer"], w["layer"]),
-                "Ondoorlatend": bool(w.get("impermeable", True)),
-                "Weerstand c_w [d]": float(w.get("resistance", WALL_RESISTANCE)),
-                "Ook in referentie": bool(w.get("reference", False)),
-                "Celranden": len(v["faces"]), "Lengte [m]": len(v["faces"]) * grid.cell,
-                "Verwijderen": False,
-            }
-            for w, v in zip(walls, grid.walls(), strict=True)
-        ]
+            Col("name", "Naam", "text"),
+            Col("layer", "Tot en met laag", "layer"),
+            Col("impermeable", "Ondoorlatend", "bool", default=True),
+            Col("resistance", "Weerstand c_w [d]", default=WALL_RESISTANCE,
+                help="Alleen als de wand niet ondoorlatend is."),
+            Col("reference", "Ook in referentie", "bool", default=False),
+            Col("faces", "Celranden", readonly=True, value=lambda k, w: faces[k]),
+            Col("length", "Lengte [m]", readonly=True, value=lambda k, w: faces[k] * grid.cell),
+        ],
+        f"{KEY}_walls_table_{ss[f'{KEY}_ver']}", state_key=f"{KEY}_walls", labels=labels,
     )  # fmt: skip
-    edited = st.data_editor(
-        table, hide_index=True, key=f"{KEY}_walls_table_{ss[f'{KEY}_ver']}", width="stretch",
-        column_config={
-            "Tot en met laag": st.column_config.SelectboxColumn(options=list(by_label)),
-            "Weerstand c_w [d]": st.column_config.NumberColumn(
-                min_value=p3.WALL_RESISTANCE[0], max_value=p3.WALL_RESISTANCE[1],
-                help="Alleen als de wand niet ondoorlatend is.",
-            ),
-            "Celranden": st.column_config.NumberColumn(disabled=True),
-            "Lengte [m]": st.column_config.NumberColumn(disabled=True),
-        },
-    )  # fmt: skip
-    for w, (_, row) in zip(walls, edited.iterrows(), strict=True):
-        w["name"] = row["Naam"]
-        w["layer"] = by_label.get(row["Tot en met laag"], row["Tot en met laag"])
-        w["impermeable"] = bool(row["Ondoorlatend"])
-        w["resistance"] = float(row["Weerstand c_w [d]"])
-        w["reference"] = bool(row["Ook in referentie"])
-    if edited["Verwijderen"].any():
-        ss[f"{KEY}_walls"] = [
-            w for w, rm in zip(walls, edited["Verwijderen"], strict=True) if not rm
-        ]
-        bump()
-        st.rerun()
     st.caption(
         "Een damwand ligt op celranden en loopt vanaf de bovenkant tot en met de gekozen laag. "
         "Scheidende lagen hebben in het model geen horizontale stroming. Zie Theorie."
@@ -242,50 +220,21 @@ def wall_table(labels: dict[str, str], grid: Grid) -> None:
 
 def group_tables(labels: dict[str, str]) -> None:
     """Editable tables of the well, GHB and CHD groups."""
-    by_label = {v: k for k, v in labels.items()}
     for kind, title in GROUP_TITLES.items():
         items = ss[f"{KEY}_{kind}"]
         if not items:
             continue
-        cols = GROUP_COLUMNS[kind]
         st.markdown(f"**{title}** (direct te bewerken)")
-        table = pd.DataFrame(
-            [
-                {
-                    **{
-                        cols[f]: labels.get(g[f], g[f])
-                        if f == "layer"
-                        else g.get(f, DEFAULT_RADIUS)
-                        for f in cols
-                    },
-                    "Cellen": len(g["points"]),
-                    "Verwijderen": False,
-                }
-                for g in items
-            ]
-        )
-        edited = st.data_editor(
-            table, hide_index=True, key=f"{KEY}_{kind}_table_{ss[f'{KEY}_ver']}",
-            width="stretch",
-            column_config={
-                "Laag": st.column_config.SelectboxColumn(options=list(by_label)),
-                "Cellen": st.column_config.NumberColumn(disabled=True),
-            },
+        cols = [
+            Col(f, label, "text" if f == "name" else "layer" if f == "layer" else "number",
+                default=DEFAULT_RADIUS if f == "radius" else None)
+            for f, label in GROUP_COLUMNS[kind].items()
+        ]  # fmt: skip
+        cols.append(Col("points", "Cellen", readonly=True, value=lambda k, g: len(g["points"])))
+        object_table(
+            items, cols, f"{KEY}_{kind}_table_{ss[f'{KEY}_ver']}", state_key=f"{KEY}_{kind}",
+            labels=labels,
         )  # fmt: skip
-        for g, (_, row) in zip(items, edited.iterrows(), strict=True):
-            for f, colname in cols.items():
-                if f == "name":
-                    g[f] = row[colname]
-                elif f == "layer":
-                    g[f] = by_label.get(row[colname], row[colname])
-                else:
-                    g[f] = float(row[colname])
-        if edited["Verwijderen"].any():
-            ss[f"{KEY}_{kind}"] = [
-                g for g, rm in zip(items, edited["Verwijderen"], strict=True) if not rm
-            ]
-            bump()
-            st.rerun()
 
 
 def watercourse_tables(grid: Grid) -> None:
@@ -295,38 +244,19 @@ def watercourse_tables(grid: Grid) -> None:
     if not ss[f"{KEY}_wcs"]:
         return
     st.markdown("**Eigenschappen watergangen** (direct te bewerken)")
-    table = pd.DataFrame(
-        [
-            {
-                "Lijn": wc_icon(k),
-                **{WC_COLUMNS[f]: wc[f] for f in WC_COLUMNS},
-                "Cellen": len(v["cells"]),
-                "Totale lengte [m]": round(sum(v["lengths"]), 1),
-                "Verwijderen": False,
-            }
-            for k, (wc, v) in enumerate(zip(ss[f"{KEY}_wcs"], wcs_view, strict=True))
-        ]
-    )
-    edited = st.data_editor(
-        table, hide_index=True, key=f"{KEY}_table_{ss[f'{KEY}_ver']}", width="stretch",
-        column_config={
-            "Lijn": st.column_config.ImageColumn(
-                "Lijn", width="small", help="Kleur en lijnsoort op de tekenkaart"
-            ),
-            "Type": st.column_config.SelectboxColumn(options=list(p3.KINDS)),
-            "Cellen": st.column_config.NumberColumn(disabled=True),
-            "Totale lengte [m]": st.column_config.NumberColumn(disabled=True),
-        },
-    )  # fmt: skip
-    for wc, (_, row) in zip(ss[f"{KEY}_wcs"], edited.iterrows(), strict=True):
-        for f, colname in WC_COLUMNS.items():
-            wc[f] = row[colname] if f in ("name", "kind") else float(row[colname])
-    if edited["Verwijderen"].any():
-        ss[f"{KEY}_wcs"] = [
-            wc for wc, rm in zip(ss[f"{KEY}_wcs"], edited["Verwijderen"], strict=True) if not rm
-        ]
-        bump()
-        st.rerun()
+    cols = [
+        Col("icon", "Lijn", readonly=True, image=True, value=lambda k, wc: wc_icon(k),
+            help="Kleur en lijnsoort op de tekenkaart"),
+        *[
+            Col(f, label, "text" if f == "name" else "select" if f == "kind" else "number",
+                options=tuple(p3.KINDS) if f == "kind" else ())
+            for f, label in WC_COLUMNS.items()
+        ],
+        Col("cells", "Cellen", readonly=True, value=lambda k, wc: len(wcs_view[k]["cells"])),
+        Col("total", "Totale lengte [m]", readonly=True,
+            value=lambda k, wc: round(sum(wcs_view[k]["lengths"]), 1)),
+    ]  # fmt: skip
+    object_table(ss[f"{KEY}_wcs"], cols, f"{KEY}_table_{ss[f'{KEY}_ver']}", state_key=f"{KEY}_wcs")
 
     with st.expander("Lengte per cel aanpassen", expanded=False):
         names = [wc["name"] for wc in ss[f"{KEY}_wcs"]]
