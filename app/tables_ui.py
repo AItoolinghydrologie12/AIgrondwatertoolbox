@@ -48,7 +48,7 @@ def _empty(v: Any) -> bool:
         return not v.strip()
     try:
         return bool(pd.isna(v))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return False
 
 
