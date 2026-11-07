@@ -29,9 +29,9 @@ def model_zip(params: p3.Params) -> bytes:
     return mf6.model_zip(params)
 
 
-def engine_badge(res: p3.Result) -> None:
-    """Which MODFLOW 6 formulation produced the result, and the time."""
-    text = f"Berekend met **{res.engine_note}** in {res.seconds:.1f} s."
+def engine_badge(res: p3.Result, extra: str = "") -> None:
+    """Which MODFLOW 6 formulation produced the result, the time and ``extra`` (one line)."""
+    text = f"Berekend met **{res.engine_note}** in {res.seconds:.1f} s{extra}."
     if res.engine_note.endswith("debiet verlaagd)"):
         st.warning(text + " Een of meer putten leveren minder dan gevraagd; zie de meldingen.")
     else:

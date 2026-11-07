@@ -308,15 +308,19 @@ def draw_step(
     zone_values: dict[int, Any],
 ) -> go.Figure:
     """Step 2; returns the drawing figure (for the PNG export)."""
-    st.caption(
-        "Kies rechts **wat** je tekent en **hoe**. Een watergang teken je als lijn (klik punten; "
-        "de lengte per cel volgt uit de lijn) of met rechthoek/lasso als volle cellen. Een "
-        "damwand klik je als lijn langs de celranden, of zet je rondom een selectie (bouwput). "
-        "Andere objecten: selecteer cellen met rechthoek of lasso (werkbalk rechtsboven) en "
-        "klik *Toepassen*. Elke watergang heeft een eigen kleur op de lijn; de grijze cellen "
-        "eronder zijn de rekencellen: hoe donkerder, hoe meer lengte van de watergang in de "
-        "cel (een lichte cel raakt de lijn maar net en telt naar verhouding weinig mee)."
-    )
+    with st.expander("Hoe teken ik?", expanded=False, icon=":material/help:"):
+        st.markdown(
+            "- Kies rechts **wat** je tekent en **hoe**.\n"
+            "- **Watergang**: als lijn (klik punten op de kaart, dan *Lijn afronden*; de lengte "
+            "per cel volgt uit de lijn) of met rechthoek/lasso als volle cellen.\n"
+            "- **Damwand**: als lijn langs de celranden, of rondom een selectie (bouwput).\n"
+            "- **Put**: één klik zet een put; meerdere tegelijk met rechthoek of lasso.\n"
+            "- **Overige objecten**: selecteer cellen met rechthoek of lasso (werkbalk "
+            "rechtsboven in de kaart) en klik *Toepassen*.\n"
+            "- Elke watergang heeft een eigen kleur. De grijze cellen eronder zijn de "
+            "rekencellen: hoe donkerder, hoe meer lengte van de watergang in de cel.\n"
+            "- *Ongedaan maken* zet de laatste 10 wijzigingen terug."
+        )
     draw_panel(grid, values, node_labels, zone_values)
     import_inputs(grid, values)
     import_notice()
@@ -514,7 +518,7 @@ def draw_panel(
                 bump()
                 st.rerun()
         st.divider()
-        b0, b1, b2 = st.columns(3)
+        b0, b1, b2 = st.columns([1.4, 1.2, 1])
         if b0.button(
             "Ongedaan maken", key=f"{KEY}_undo_draw", icon=":material/undo:",
             disabled=not can_undo(),

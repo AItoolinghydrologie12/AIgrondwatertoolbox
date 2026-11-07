@@ -86,7 +86,7 @@ def test_grid_product_profile_modes() -> None:
     at = _toolbox(page, 120)
     at.button(key="p3_calc").click().run()
     assert not at.exception, [e.value for e in at.exception]
-    assert len(at.metric) >= 6  # KPI cards
+    assert len(at.metric) >= 4  # KPI cards
     at.slider(key="p3_ph").set_value(400.0).run()
     assert not at.exception, [e.value for e in at.exception]
     at.session_state["p3_pmode"] = "verticaal"

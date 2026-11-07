@@ -15,7 +15,7 @@ from engine_ui import mf6_status, run
 from location_ui import location_inputs
 from project_io import apply_project, parse_project, to_json
 from result_ui import result_tabs
-from status_ui import calc_status
+from status_ui import calc_status, progress_list
 from subsoil_ui import model_area_inputs, subsoil_step
 from toolbox_state import DEFAULTS, KEY, Grid, build_params, checkpoint, clear_undo, reset, ss
 from ui_common import number, page_header, show_param_error
@@ -46,10 +46,8 @@ clicked = st.sidebar.button(
     width="stretch",
 )  # fmt: skip
 status_side = st.sidebar.empty()
+progress_side = st.sidebar.container()
 values: dict[str, Any] = {}
-with st.sidebar.expander("Model en rand", expanded=True):
-    model_area_inputs(values)
-    st.caption("De modelrand en kwel stel je in bij stap 1.")
 project_box = st.sidebar.expander("Project opslaan of laden", expanded=False)
 with st.sidebar.expander("Beoordeling en numeriek", expanded=False):
     values["threshold"] = number(
@@ -80,7 +78,10 @@ step1, step2, step3 = st.tabs(STEPS, key=f"{KEY}_step")
 
 # ---- stap 1: ondergrond, maaiveld en drainage ------------------------------------------
 with step1:
-    location_inputs(values)
+    location_box = st.container()  # shown first, filled once the model size is known
+    model_area_inputs(values)
+    with location_box:
+        location_inputs(values)
     stack, zone_values, schematic_of, schematic_box = subsoil_step(values)
 
 cell = float(values["cell"])
@@ -91,7 +92,8 @@ if max(grid.nrow, grid.ncol) > max_cells:
         st.warning(
             f"Met {len(stack.nodes)} rekenlagen kan het model maximaal {max_cells} × {max_cells} "
             f"cellen hebben (nu {grid.ncol} × {grid.nrow}), om de rekentijd en het geheugen "
-            "binnen de perken te houden. Kies grotere cellen of een kleiner model (zijbalk)."
+            "binnen de perken te houden. Kies grotere cellen of een kleiner model "
+            "(Modelgebied, bovenaan stap 1)."
         )
 node_labels = {n.key: n.label for n in stack.nodes} if not stack.errors() else {}
 
@@ -137,6 +139,8 @@ if clicked and input_error is None and mf6_ok:
 status = calc_status(mf6_ok, mf6_msg, calc_error, ss.get(f"{KEY}_result"), current)
 getattr(c_msg, status[0])(status[1])
 getattr(status_side, status[0])(status[1])
+with progress_side:
+    progress_list(stack, grid, ss.get(f"{KEY}_geo", False), status[0])
 if input_error is not None:
     with step3:
         show_param_error(input_error)

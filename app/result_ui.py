@@ -54,7 +54,7 @@ def limit_lines(threshold: float, view: str) -> list[tuple[float, str, str]]:
     return []
 
 
-def show_kpis(params: p3.Params, res: p3.Result, seconds: float) -> None:
+def show_kpis(params: p3.Params, res: p3.Result) -> None:
     rise0 = res.rise[0]
     area_ha = float((rise0 >= params.threshold).sum()) * params.cell**2 / 1e4
     raised = [wc.name for wc in params.watercourses if wc.stage_new != wc.stage_ref]
@@ -62,7 +62,7 @@ def show_kpis(params: p3.Params, res: p3.Result, seconds: float) -> None:
     q_new = float(res.budget.loc[raised, "opzet [m³/d]"].sum()) if raised else 0.0
     wet_extra = res.inundated["opzet"] - res.inundated["referentie"]
     balance = max(res.mass_balance.values())
-    row1 = st.columns(3)
+    row1 = st.columns(4)
     row1[0].metric(
         "Max. verhoging freatisch", f"{np.nanmax(rise0):.2f} m", border=True,
         help="Grootste stijging van de grondwaterstand (opzet − referentie) in het model.",
@@ -79,28 +79,15 @@ def show_kpis(params: p3.Params, res: p3.Result, seconds: float) -> None:
         help="Netto uitwisseling van de watergangen met een ander peil na opzet; "
         "positief = water het grondwater in.",
     )  # fmt: skip
-    row2 = st.columns(3)
-    row2[0].metric(
+    row1[3].metric(
         "Extra cellen met water op maaiveld", f"{wet_extra:d}",
         delta=f"{res.inundated['opzet']} na opzet, {res.inundated['referentie']} referentie",
-        delta_color="off", delta_arrow="off", border=True,
-    )  # fmt: skip
-    row2[1].metric(
-        "Balansfout (max.)", f"{balance:.1e}",
-        delta="in orde" if balance < BALANCE_OK else "controleer",
-        delta_color="normal" if balance < BALANCE_OK else "inverse",
-        delta_arrow="off", border=True,
-    )  # fmt: skip
-    cells = f"{params.nrow * params.ncol:,}".replace(",", ".")
-    row2[2].metric(
-        "Rekentijd", f"{seconds:.1f} s",
-        delta=f"{cells} cellen × {len(res.node_labels)} lagen",
         delta_color="off", delta_arrow="off", border=True,
     )  # fmt: skip
     drawdown = -float(np.nanmin(rise0))
     if drawdown >= DRAWDOWN_SHOWN:  # e.g. a dewatering: the same figures for the drawdown
         area_dd = float((rise0 <= -params.threshold).sum()) * params.cell**2 / 1e4
-        row3 = st.columns(3)
+        row3 = st.columns(4)
         row3[0].metric(
             "Max. verlaging freatisch", f"{drawdown:.2f} m", border=True,
             help="Grootste daling van de grondwaterstand (referentie − opzet) in het model.",
@@ -109,8 +96,19 @@ def show_kpis(params: p3.Params, res: p3.Result, seconds: float) -> None:
             f"Oppervlak verlaging ≥ {params.threshold * 100:.0f} cm", f"{area_dd:.1f} ha",
             border=True, help="Som van de cellen waar de freatische verlaging de grens haalt.",
         )  # fmt: skip
-    for w_msg in res.warnings:
-        st.warning(w_msg)
+    cells = f"{params.nrow * params.ncol:,}".replace(",", ".")
+    check = "in orde" if balance < BALANCE_OK else ":red[**controleer de invoer**]"
+    engine_badge(
+        res,
+        f" · {cells} cellen × {len(res.node_labels)} lagen · balansfout {balance:.1e} ({check})",
+    )
+    if res.warnings:
+        n = len(res.warnings)
+        with st.expander(
+            f"Meldingen bij deze berekening ({n})", expanded=n <= 3, icon=":material/warning:"
+        ):
+            for w_msg in res.warnings:
+                st.warning(w_msg)
 
 
 def profile_points(params: p3.Params) -> list[tuple[float, float]]:
@@ -463,8 +461,7 @@ NO_RESULT = "Nog geen resultaat: klik op **Bereken**."
 def result_tabs(done: dict[str, Any] | None, fig_draw: go.Figure) -> None:
     """Key figures and the tabs Resultaat · Theorie · Aannames · Validatie · Export."""
     if done is not None:
-        engine_badge(done["res"])
-        show_kpis(done["params"], done["res"], done["res"].seconds)
+        show_kpis(done["params"], done["res"])
     t_res, t_theory, t_ass, t_val, t_exp = st.tabs(TABS)
     with t_theory:
         st.markdown(theory)
