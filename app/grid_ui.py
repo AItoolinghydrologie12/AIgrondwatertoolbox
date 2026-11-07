@@ -304,6 +304,7 @@ def result_figure(
     min_span: float = 0.0,
     walls: list[dict[str, Any]] | None = None,
     wc_style: str = "cellen",
+    hover: str = "%{z:.3f} m",
 ) -> go.Figure:
     """Contour map of a result field with ``limits`` (level, colour, legend name: a thick
     line where the field crosses the level, e.g. the 5 cm limit) and the watercourses
@@ -311,7 +312,7 @@ def result_figure(
     "uit" leaves them out), an optional profile line, and (``click_snap``) a last trace of
     click points on a snap grid.
     ``min_span``: smallest half-range of a diverging scale, so that tiny values stay near
-    white."""
+    white. ``hover``: the value with its unit in the hover text."""
     if diverging:
         vmax = max(float(np.nanmax(np.abs(z))), min_span) or 1.0
         scale = {"colorscale": "RdBu", "zmin": -vmax, "zmax": vmax}
@@ -321,7 +322,7 @@ def result_figure(
     fig = go.Figure(
         go.Contour(
             x=x, y=y, z=z32, ncontours=20, contours={"showlabels": True}, colorbar={"title": label},
-            hovertemplate="x = %{x:.0f} m<br>y = %{y:.0f} m<br>%{z:.3f} m<extra></extra>",
+            hovertemplate="x = %{x:.0f} m<br>y = %{y:.0f} m<br>" + hover + "<extra></extra>",
             **scale,
         )
     )  # fmt: skip
