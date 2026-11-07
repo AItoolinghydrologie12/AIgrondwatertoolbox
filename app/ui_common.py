@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import pandas as pd
@@ -166,6 +167,23 @@ def _layer_cards(
                         kh = number(Layer, "k_h", lay.k_h, f"{k}_kh", 0.01)
                 aquitards.append((d, c, kh))
     return aquifers, aquitards
+
+
+@contextmanager
+def friendly_errors() -> Iterator[None]:
+    """Show an unexpected error as a Dutch message with the details folded away, instead of
+    a bare traceback. Streamlit's own reruns/stops are BaseExceptions and pass through."""
+    try:
+        yield
+    except Exception as err:  # noqa: BLE001 - last resort, shown to the user
+        st.error(
+            "Er ging iets mis in de app. Sla je project op (zijbalk → *Project opslaan of "
+            "laden*), ververs de pagina en laad het project weer. Blijft het gebeuren, geef dan "
+            "de technische details hieronder door aan de beheerder van de app.",
+            icon=":material/error:",
+        )
+        with st.expander("Technische details"):
+            st.exception(err)
 
 
 def show_param_error(err: ParamError) -> None:

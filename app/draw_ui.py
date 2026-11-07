@@ -28,6 +28,7 @@ from toolbox_state import (
     ss,
     undo,
 )  # fmt: skip
+from ui_common import friendly_errors
 from water_import_ui import area_outlines, import_inputs, import_notice
 
 from gwproducten.products import peilopzet_grid as p3
@@ -327,11 +328,22 @@ def draw_step(
     group_tables(node_labels)
     wall_table(node_labels, grid)
     watercourse_tables(grid)
-    return ss[f"{KEY}_fig_draw"]
+    return ss.get(f"{KEY}_fig_draw")
 
 
 @st.fragment
 def draw_panel(
+    grid: Grid,
+    values: dict[str, Any],
+    node_labels: dict[str, str],
+    zone_values: dict[int, Any],
+) -> None:
+    """The drawing panel as a fragment, with a readable message on an unexpected error."""
+    with friendly_errors():
+        _draw_panel(grid, values, node_labels, zone_values)
+
+
+def _draw_panel(
     grid: Grid,
     values: dict[str, Any],
     node_labels: dict[str, str],

@@ -40,6 +40,18 @@ class Col:
     image: bool = False
 
 
+def _empty(v: Any) -> bool:
+    """A cell the user emptied: None, NaN or blank text."""
+    if v is None:
+        return True
+    if isinstance(v, str):
+        return not v.strip()
+    try:
+        return bool(pd.isna(v))
+    except (TypeError, ValueError):
+        return False
+
+
 def _choices(col: Col, labels: dict[str, str]) -> dict[str, str] | None:
     """Stored value -> shown text of a choice column (None for other kinds)."""
     if col.kind == "layer":
@@ -94,11 +106,15 @@ def object_table(
         DELETE, help="Vink aan om dit object te verwijderen (ongedaan te maken)."
     )
     edited = st.data_editor(table, hide_index=True, key=key, width="stretch", column_config=config)
+    emptied: set[str] = set()
     for obj, (_, row) in zip(items, edited.iterrows(), strict=True):
         for c in cols:
             if c.readonly or c.value is not None:
                 continue
             v = row[c.label]
+            if _empty(v) and c.kind != "bool":  # an emptied cell keeps the old value
+                emptied.add(c.label)
+                continue
             choices = _choices(c, labels)
             if choices is not None:  # shown text -> stored value
                 obj[c.field] = {t: s for s, t in choices.items()}.get(v, v)
@@ -108,6 +124,12 @@ def object_table(
                 obj[c.field] = bool(v)
             else:
                 obj[c.field] = float(v)
+    if emptied:
+        st.warning(
+            f"Lege cel in {', '.join(sorted(emptied))}: die waarde is niet aangepast (de app "
+            "rekent met de vorige waarde). Vul een getal of naam in.",
+            icon=":material/edit_off:",
+        )
     if edited[DELETE].any():
         st.session_state[state_key] = [
             obj for obj, rm in zip(items, edited[DELETE], strict=True) if not rm

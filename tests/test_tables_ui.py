@@ -83,3 +83,31 @@ def test_delete_removes_rows_with_undo(editor: dict, monkeypatch: pytest.MonkeyP
     object_table(objs, COLS, "k", state_key="s", labels=LAYERS)
     assert [o["name"] for o in tables_ui.st.session_state["s"]] == ["Greppel"]
     assert calls == ["bump", "rerun"]
+
+
+def test_emptied_cells_keep_old_values_and_warn(
+    editor: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    warned = []
+    monkeypatch.setattr(tables_ui.st, "warning", lambda text, **kw: warned.append(text))
+    objs = items()
+    editor["edits"] = {(0, "Q [m³/d]"): None, (1, "Naam"): "  "}
+    object_table(objs, COLS, "k", state_key="s", labels=LAYERS)
+    assert objs[0]["q"] == 1.0 and objs[1]["name"] == "Greppel"
+    assert len(warned) == 1 and "Naam" in warned[0] and "Q [m³/d]" in warned[0]
+
+
+def test_friendly_errors_shows_message_but_lets_reruns_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ui_common
+    from streamlit.runtime.scriptrunner_utils.exceptions import RerunException
+
+    shown = []
+    monkeypatch.setattr(ui_common.st, "error", lambda text, **kw: shown.append(text))
+    monkeypatch.setattr(ui_common.st, "exception", lambda err: shown.append(type(err)))
+    with ui_common.friendly_errors():
+        raise KeyError("oeps")
+    assert "Er ging iets mis" in shown[0] and shown[1] is KeyError
+    with pytest.raises(RerunException), ui_common.friendly_errors():
+        raise RerunException(None)

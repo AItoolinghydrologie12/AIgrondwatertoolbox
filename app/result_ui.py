@@ -20,7 +20,7 @@ from profile_ui import (
     wall_crossings,
 )
 from toolbox_state import KEY, MAP_CONFIG, rerun_fragment, ss
-from ui_common import TABS, csv_button, dict_table, png_buttons, split_theory
+from ui_common import TABS, csv_button, dict_table, friendly_errors, png_buttons, split_theory
 
 from gwproducten.products import peilopzet_grid as p3
 from gwproducten.products.peilopzet_grid.gis import to_gpkg
@@ -325,7 +325,8 @@ def result_panel(
     """The result map, profile and tables as a fragment: choosing another map, layer or
     profile reruns only this panel. ``out`` receives the figures and the profile table for
     the export (a plain dict, so a deferred download reads the latest profile)."""
-    out["fig_res"], out["fig_prof"], out["prof"] = show_result(params, res, wcs_done)
+    with friendly_errors():
+        out["fig_res"], out["fig_prof"], out["prof"] = show_result(params, res, wcs_done)
 
 
 def show_validation(params: p3.Params, res: p3.Result) -> None:
@@ -512,7 +513,13 @@ def result_tabs(done: dict[str, Any] | None, fig_draw: go.Figure) -> None:
     with t_val:
         show_validation(done["params"], done["res"])
     with t_exp:
-        figs = {"peilopzet2d_kaart": out["fig_res"], "peilopzet2d_tekening": fig_draw}
-        if out["fig_prof"] is not None:
-            figs["peilopzet2d_profiel"] = out["fig_prof"]
+        figs = {
+            name: fig
+            for name, fig in (
+                ("peilopzet2d_kaart", out.get("fig_res")),
+                ("peilopzet2d_tekening", fig_draw),
+                ("peilopzet2d_profiel", out.get("fig_prof")),
+            )
+            if fig is not None
+        }
         show_export(done["params"], done["res"], done["wcs"], figs, out)
