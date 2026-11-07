@@ -319,16 +319,19 @@ def show_validation(params: p3.Params, res: p3.Result) -> None:
         "serieweerstand, ingesloten bouwput, lekkende wand, gesplitst pakket, gridverfijning)."
     )
     st.markdown(
-        "**Vergelijking met MODFLOW 6** (`tests/test_mf6_comparison.py`, lokaal met flopy): "
-        "zelfde rooster met elke laag als MF6-modellaag. Stijghoogten gelijk binnen 10⁻⁶ m "
-        "voor vaste en meebewegende T (MF6 'convertible'), putten, kwel, zones, alle "
-        "randtypen en damwanden (HFB-pakket). Verschillen alleen bij droogvallende cellen en "
-        "t.o.v. MF6-Newton (stroomopwaartse weging van de natte dikte, enkele cm bij grote "
-        "verlaging)."
+        "**Rekenkern MODFLOW 6** (USGS; Langevin e.a., 2017). Elke laag is een MF6-modellaag "
+        "(scheidende lagen met K33 = D/c). Eerst de standaardformulering; bij droogvallende "
+        "cellen Newton; levert een put meer dan de laag kan geven, dan Newton met "
+        "AUTO_FLOW_REDUCE (de put levert minder, met melding). `tests/test_mf6_reference.py` "
+        "vergelijkt tien testgevallen (putten, kwel, zones, alle randtypen, damwanden, "
+        "meebewegende T) met vaste referentie-uitkomsten: stijghoogten binnen 10⁻⁵ m. "
+        "Gebruikte formulering nu: " + res.engine_note + "."
     )
     st.dataframe(dict_table(res.mass_balance, "Massabalansfout [-]", "{:.1e}"), hide_index=True)
     st.dataframe(
-        dict_table({f"Iteraties RIV/DRN {k}": v for k, v in res.iterations.items()}, fmt="{:.0f}"),
+        dict_table(
+            {f"Iteraties MODFLOW 6 {k}": v for k, v in res.iterations.items()}, fmt="{:.0f}"
+        ),  # fmt: skip
         hide_index=True,
     )
     st.markdown("**Benchmark: lange evenwijdige sloten tegen de analytische peilopzet**")
@@ -460,7 +463,7 @@ NO_RESULT = "Nog geen resultaat: klik op **Bereken**."
 def result_tabs(done: dict[str, Any] | None, fig_draw: go.Figure) -> None:
     """Key figures and the tabs Resultaat · Theorie · Aannames · Validatie · Export."""
     if done is not None:
-        engine_badge(done["params"], done["res"])
+        engine_badge(done["res"])
         show_kpis(done["params"], done["res"], done["res"].seconds)
     t_res, t_theory, t_ass, t_val, t_exp = st.tabs(TABS)
     with t_theory:

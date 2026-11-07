@@ -15,7 +15,7 @@ dependencies = [
     "plotly==7.1.0",
     "requests==2.34.2",  # map data (PDOK, REGIS) for a model location
     "pillow==13.0.0",  # background maps and AHN raster (already installed with streamlit)
-    "contourpy==1.4.0",  # contour lines for the GIS export (already installed with matplotlib)
+    "contourpy==1.4.0",  # contour lines for the GIS export
 ]
 
 [project.optional-dependencies]
@@ -25,9 +25,6 @@ app = [
     # location map: PDOK tiles in the browser, a click returns the point (no server images)
     "streamlit-folium==0.27.4",
     "folium==0.20.0",
-    # MODFLOW 6 as second calculation engine (builds and reads the MF6 model files)
-    "flopy==3.11.0",
-    "matplotlib==3.11.2",  # required by flopy; pinned for a reproducible environment
 ]
 dev = [
     "pytest==9.2.0",

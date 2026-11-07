@@ -95,15 +95,13 @@ Alle randvoorwaarden zijn **head-dependent** zoals in MODFLOW:
 | **buisdrainage** (per cel aan/uit) | $\frac{A}{w_d}(h_d - h)$ | $h > h_d$ |
 | **maaivelddrainage** (alle cellen) | $\frac{A}{w_\text{mv}}(h_\text{mv} - h)$ | $h > h_\text{mv}$ |
 
-De afwisseling actief/inactief is niet-lineair. Het stelsel wordt daarom iteratief opgelost:
-oplossen, per element de toestand bepalen, en herhalen tot er geen toestand meer verandert
-(Picard).
-
-De toestanden veranderen alleen de diagonaal van de matrix. Daarom wordt één
-LU-ontbinding (minimum-graadordening) hergebruikt: exact als de matrix gelijk is, anders
-als preconditioner voor geconjugeerde gradiënten (relatieve tolerantie $10^{-12}$); bij
-veel gewijzigde cellen wordt opnieuw ontbonden. De opzetrun start vanuit de toestanden
-van de referentie en deelt de ontbinding.
+De afwisseling actief/inactief is niet-lineair. **MODFLOW 6** (Langevin e.a., 2017) lost
+het stelsel op: de app schrijft de RIV- en DRN-pakketten met de conductances hierboven en MF6
+itereert (IMS, buitenste iteraties tot de stijghoogte minder dan $10^{-7}$ m verandert). Per
+run eerst de standaardformulering; bij droogvallende cellen of geen convergentie de
+Newton-formulering; lukt ook dat niet en zijn er putten, dan Newton met AUTO_FLOW_REDUCE
+(zie *Putten*). Referentie, opzet en opzet zonder putten rekenen naast elkaar, elk in een
+eigen tijdelijke map. De waterbalans komt uit MF6 (BUDGETCSV).
 
 **Conductance per cel.** Uit de geometrie volgen per watergang de geraakte lagen: de natte
 omtrek per laag, met open wanden. Per knoop is
@@ -198,10 +196,16 @@ Glee op $r = r_w$ (lekkend pakket, $\lambda$ = 100 m) is de afwijking 0,1–0,9 
 (skin) en partiële filterlengte zitten er niet in. Ligt de putstijghoogte onder de onderkant
 van de laag, dan meldt de app dat het debiet niet haalbaar is.
 
-De **verlaging door de putten** toont de app apart. Met vaste $T$ is het model lineair bij
-vaste toestanden van RIV/DRN: de verlaging is dan de oplossing van hetzelfde stelsel met
-alleen de putdebieten als belasting. Met meebewegende $T$ is het niet-lineair; dan rekent de
-app de opzetsituatie nog een keer zonder putten en is de verlaging het verschil.
+De **verlaging door de putten** toont de app apart: de app rekent de opzetsituatie nog een
+keer zonder putten en de verlaging is het verschil.
+
+**Put die droogvalt.** Vraagt een put meer dan de laag kan leveren, dan valt de laag rond de
+put droog en vindt MODFLOW 6 geen oplossing. De app rekent dan met de WEL-optie
+AUTO_FLOW_REDUCE (fractie 0,1 van de laagdikte): het debiet wordt verlaagd zodra de
+stijghoogte in de putcel de onderkant nadert. De app meldt gevraagd en geleverd debiet;
+waterbalans en verlaging horen bij het geleverde debiet. Toets: 2000 m³/d gevraagd uit 2 m
+natte dikte (k = 10 m/d) levert ca. 40 m³/d, 1,24 × het Dupuit-maximum
+$\pi k (H^2 - h_w^2)/\ln(R/r_e)$ met $h_w = 0$ (Newton weegt de natte dikte stroomopwaarts).
 
 **Meebewegende transmissiviteit (MODFLOW 6 "convertible").** Per cel is
 
@@ -213,12 +217,13 @@ met $b$ de natte dikte. Voor het freatisch zandpakket is $z_\text{top}$ het maai
 pakket onder een scheidende laag blijft volledig gevuld zolang de stijghoogte boven de
 bovenkant ligt, en wordt plaatselijk freatisch als ze eronder zakt (melding). De knoop in een
 deklaag van klei houdt een vaste $T$ (verwaarloosbaar klein). Tussen cellen geldt het
-harmonisch gemiddelde van $k_h b$, zoals MODFLOW 6 standaard (zonder upstream-weging). De
-verticale weerstand $\tfrac{1}{2}D/k_v$ blijft op de volle dikte (MODFLOW 6 zonder
-VARIABLECV). $T$ wordt in dezelfde Picard-iteratie bijgewerkt als de RIV/DRN-toestanden, tot
-de stijghoogte minder dan $10^{-5}$ m verandert. Een cel met de minimale natte dikte (1 % van
-$D$) is **droog**: ze blijft meerekenen, zoals bij de Newton-methode van MODFLOW 6, en de
-kaarten tonen daar de onderkant van de laag. Validatie: freatische strook met neerslag tussen
+harmonisch gemiddelde van $k_h b$ (MODFLOW 6 standaardformulering; met Newton weegt MF6 de
+natte dikte stroomopwaarts). De verticale weerstand $\tfrac{1}{2}D/k_v$ blijft op de volle
+dikte (MODFLOW 6 zonder VARIABLECV). Een cel die droogvalt rekent MF6 met Newton door; de
+kaarten tonen daar de onderkant van de laag. Ligt het peil van een rand (GHB, DRN, CHD) of
+de bodem van een RIV onder de onderkant van een meebewegende cel, dan houdt die cel een vaste
+$T = k_h D$: MODFLOW 6 staat zo'n rand bij een meebewegende cel niet toe. De app meldt het
+aantal cellen per rand. Validatie: freatische strook met neerslag tussen
 twee vaste peilen tegen Dupuit, $h^2 = h_0^2 + (N/k)\,x(L-x)$, binnen 1 cm.
 
 **Algemene stijghoogterand (GHB).** Een GHB-groep is een set cellen in één rekenlaag met een
@@ -376,6 +381,9 @@ lekkende wand gelijk aan de onttrekking min de neerslag binnen de wand; gelijk a
 - Harbaugh, A.W. (2005). *MODFLOW-2005, The U.S. Geological Survey modular ground-water
   model — the Ground-Water Flow Process*. USGS Techniques and Methods 6-A16 (RIV- en
   DRN-pakket).
+- Langevin, C.D., Hughes, J.D., Banta, E.R., Niswonger, R.G., Panday, S. & Provost, A.M.
+  (2017). *Documentation for the MODFLOW 6 Groundwater Flow Model*. USGS Techniques and
+  Methods 6-A55 (de rekenkern van deze app).
 - Ernst, L.F. (1962). *Grondwaterstromingen in de verzadigde zone en hun berekening bij
   aanwezigheid van horizontale evenwijdige open leidingen*. Verslagen van Landbouwkundige
   Onderzoekingen 67.15, Pudoc, Wageningen.

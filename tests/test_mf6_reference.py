@@ -1,15 +1,18 @@
-"""The app against MODFLOW 6 (flopy) on the same grid and boundaries. Skipped when flopy or
-the mf6 executable is missing (``pip install -e .[mf6]`` and ``get-modflow :flopy``).
+"""The app's MODFLOW 6 engine against fixed reference results.
 
-MF6 gets every layer as a model layer (aquitards with K33 = D/c), so this checks the
-quasi-3D resistances, the harmonic mean, the RIV/DRN/GHB/WEL/CHD terms, the continuing
-boundary and the convertible transmissivity. The watercourse conductances are the app's own
-(the radial resistance is checked against the x-z model in test_radial_anisotropy.py)."""
+The reference (tests/data/reference_cases.*) holds heads, water balance, well table, wall
+flows and messages of ten cases computed on 2026-11-07 by the app's former own solver, which
+agreed with MODFLOW 6 (flopy-built models) within 1e-5 m in every case. The cases cover the
+quasi-3D resistances, the harmonic mean, RIV/DRN/GHB/WEL/CHD, the continuing boundary, zones,
+convertible transmissivity, sheet pile walls (HFB) and the MF6 row order. Skipped when the
+mf6 executable is missing."""
 
 import dataclasses
+import json
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from gwproducten.core.grids import outline_faces, polyline_faces
@@ -17,7 +20,7 @@ from gwproducten.core.layers import LayerStack, build_layers
 from gwproducten.products import peilopzet_grid as p3
 from gwproducten.products.peilopzet_grid import mf6
 
-pytestmark = pytest.mark.skipif(not mf6.available(), reason="flopy/mf6 niet geïnstalleerd")
+pytestmark = pytest.mark.skipif(not mf6.available(), reason="mf6 niet geïnstalleerd")
 
 CLAY = LayerStack(
     "deklaag",
@@ -96,14 +99,37 @@ CASES = {
 }  # fmt: skip
 
 
+DATA = Path(__file__).parent / "data"
+REFERENCE = np.load(DATA / "reference_cases.npz")
+META = json.loads((DATA / "reference_cases.json").read_text(encoding="utf-8"))
+
+
 @pytest.mark.parametrize("name", list(CASES))
-def test_heads_equal_modflow6(name: str, tmp_path: Path) -> None:
-    """Measured: all heads within 1e-6 m of MODFLOW 6 (standard formulation)."""
-    par = CASES[name]
-    res = p3.compute(par)
-    for stage, heads in (("ref", res.heads_ref), ("new", res.heads_new)):
-        h = mf6.run(par, stage, tmp_path / stage)
-        assert np.max(np.abs(h - heads)) < 1e-5, stage
+def test_compute_matches_reference(name: str) -> None:
+    """Same heads, water balance per item (read from the MF6 listing), well table, wall flows,
+    inundated cells and messages as the reference."""
+    res = p3.compute(CASES[name])
+    ref, i = META[name], META[name]["index"]
+    assert res.engine_note.startswith("MODFLOW 6")
+    assert np.max(np.abs(res.heads_ref - REFERENCE[f"c{i}_ref"])) < 1e-5
+    assert np.max(np.abs(res.heads_new - REFERENCE[f"c{i}_new"])) < 1e-5
+    budget = pd.DataFrame(ref["budget"]).loc[res.budget.index]
+    scale = budget.abs().to_numpy().max()
+    diff = (res.budget - budget).drop(index="som (balansfout)").abs().to_numpy().max()
+    assert diff < 1e-5 * scale
+    assert max(res.mass_balance.values()) < 1e-5
+    assert res.inundated == ref["inundated"]
+    assert res.warnings == ref["warnings"]
+    if f"c{i}_wd" in REFERENCE:
+        assert np.max(np.abs(res.well_drawdown - REFERENCE[f"c{i}_wd"])) < 1e-4
+    if ref["wells"] is not None:
+        delivered = res.wells.pop("Q opzet geleverd [m³/d]")
+        np.testing.assert_allclose(delivered, res.wells["Q opzet [m³/d]"], rtol=1e-9)
+        assert np.allclose(res.wells.select_dtypes("number"), np.array(ref["wells"], float),
+                           atol=1e-4, equal_nan=True)  # fmt: skip
+    if ref["walls"] is not None:
+        assert np.allclose(res.walls.select_dtypes("number"), np.array(ref["walls"], float),
+                           atol=1e-5 * scale)  # fmt: skip
 
 
 def test_newton_differs_only_by_upstream_weighting(tmp_path: Path) -> None:
@@ -113,50 +139,44 @@ def test_newton_differs_only_by_upstream_weighting(tmp_path: Path) -> None:
     res = p3.compute(par)
     h = mf6.run(par, "new", tmp_path, newton=True)
     assert np.max(np.abs(h - res.heads_new)) < 0.05
+    assert 0.01 < np.max(np.abs(h - res.heads_new))  # really the other formulation
 
 
-def test_without_convertible_matches_mf6_confined(tmp_path: Path) -> None:
+def test_without_convertible_equals_single_run(tmp_path: Path) -> None:
     par = dataclasses.replace(CASES["freatische put, natte dikte 10 -> 7,7 m"], convertible=False)
     res = p3.compute(par)
     h = mf6.run(par, "new", tmp_path)
-    assert np.max(np.abs(h - res.heads_new)) < 1e-5
+    assert np.max(np.abs(h - res.heads_new)) < 1e-9
 
 
-@pytest.mark.parametrize("name", list(CASES))
-def test_compute_with_mf6_engine_equals_own_solver(name: str) -> None:
-    """The whole product with MODFLOW 6 as engine: same heads, same water balance per item
-    (read from the MF6 listing), same well table and messages as the own solver."""
-    own = p3.compute(CASES[name])
-    mf = p3.compute(dataclasses.replace(CASES[name], engine="mf6"))
-    assert (own.engine, mf.engine) == ("eigen", "mf6")
-    assert mf.engine_note.startswith("MODFLOW 6")
-    assert np.max(np.abs(mf.heads_new - own.heads_new)) < 1e-5
-    assert np.max(np.abs(mf.rise - own.rise)) < 1e-5
-    scale = own.budget.abs().to_numpy().max()
-    diff = (mf.budget - own.budget).drop(index="som (balansfout)").abs().to_numpy().max()
-    assert diff < 1e-4 * scale
-    assert max(mf.mass_balance.values()) < 1e-6
-    assert mf.inundated == own.inundated
-    if own.well_drawdown is not None:
-        assert np.max(np.abs(mf.well_drawdown - own.well_drawdown)) < 1e-4
-        assert np.allclose(mf.wells.select_dtypes("number"), own.wells.select_dtypes("number"),
-                           atol=1e-4, equal_nan=True)  # fmt: skip
-    if own.walls is not None:
-        assert np.allclose(mf.walls.select_dtypes("number"), own.walls.select_dtypes("number"),
-                           atol=1e-4 * scale)  # fmt: skip
-    strip = [w for w in own.warnings if "geconvergeerd" not in w]
-    assert [w for w in mf.warnings if "geconvergeerd" not in w] == strip
+def test_missing_mf6_gives_a_clear_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(mf6, "_exe", lambda: None)
+    with pytest.raises(RuntimeError, match="niet gevonden"):
+        p3.compute(p3.Params())
 
 
-def test_mf6_failure_falls_back_to_own_solver(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fail(*args, **kwargs):
-        raise RuntimeError("MODFLOW 6 is niet geconvergeerd (standaard en Newton).")
+def test_failing_mf6_gives_a_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(mf6, "_run", lambda ws: (False, "fout"))
+    with pytest.raises(RuntimeError, match="geen oplossing"):
+        p3.compute(p3.Params())
 
-    monkeypatch.setattr(mf6, "solve", fail)
-    res = p3.compute(dataclasses.replace(p3.Params(), engine="mf6"))
-    assert res.engine == "eigen"
-    assert "niet geconvergeerd" in res.engine_note and "eigen solver" in res.engine_note
-    np.testing.assert_allclose(res.heads_new, p3.compute(p3.Params()).heads_new)
+
+def test_head_file_reader(tmp_path: Path) -> None:
+    """The binary head file layout of MF6 (DIS): header per layer, then the values."""
+    nrow, ncol = 2, 3
+    record = np.dtype(
+        [("kstp", "<i4"), ("kper", "<i4"), ("pertim", "<f8"), ("totim", "<f8"),
+         ("text", "S16"), ("ncol", "<i4"), ("nrow", "<i4"), ("ilay", "<i4"),
+         ("data", "<f8", (nrow * ncol,))]
+    )  # fmt: skip
+    data = np.zeros(4, dtype=record)
+    for k in range(4):  # two time steps of two layers: the last step counts
+        data[k] = (1 + k // 2, 1, 1.0, 1.0, b"            HEAD", ncol, nrow, 1 + k % 2,
+                   np.arange(6.0) + 10 * k)  # fmt: skip
+    data.tofile(tmp_path / "gwt.hds")
+    heads = mf6.read_heads(tmp_path / "gwt.hds", nrow, ncol)
+    assert heads.shape == (2, nrow, ncol)
+    np.testing.assert_array_equal(heads[1].ravel(), np.arange(6.0) + 30)
 
 
 def test_model_zip_is_north_up_with_rd_origin() -> None:
@@ -176,3 +196,16 @@ def test_model_zip_is_north_up_with_rd_origin() -> None:
     assert any(line.split()[1:3] == ["36", "34"] for line in wel_text.splitlines()
                if line.strip() and line.split()[0].isdigit())  # fmt: skip
     assert "noordrand" in readme and "155000" in readme
+
+
+def test_level_below_layer_bottom_keeps_fixed_t_there() -> None:
+    """A GHB stage below the bottom of the convertible phreatic layer: MF6 refuses that, so
+    those cells keep a fixed transmissivity (choice of Job); the rest stays convertible."""
+    cells = tuple((1, c) for c in range(1, 39))  # inside the fixed outer ring
+    par = p3.Params(ghb=(p3.GhbGroup("Boezem", cells, "freatisch", -0.6, -0.6, 2.0),))
+    bottom = p3.layer_geometry(par)[0][2]
+    assert np.all(np.asarray(bottom) > -0.6)
+    res = p3.compute(par)
+    assert any(w.startswith("Boezem: in 38 cellen ligt het peil") for w in res.warnings)
+    assert res.budget.loc["Boezem", "opzet [m³/d]"] < 0  # it drains the model
+    assert max(res.mass_balance.values()) < 1e-5

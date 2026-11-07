@@ -12,7 +12,7 @@ from typing import Any
 
 import streamlit as st
 from draw_ui import draw_step
-from engine_ui import ENGINE_LABEL, mf6_status, run
+from engine_ui import mf6_status, run
 from location_ui import location_inputs
 from project_io import apply_project, parse_project, to_json
 from result_ui import result_tabs
@@ -86,15 +86,10 @@ with st.sidebar.expander("Beoordeling en numeriek", expanded=False):
         "freatisch pakket en in pakketten waar de stijghoogte onder de bovenkant zakt.",
     )
     mf6_ok, mf6_msg = mf6_status()
-    if not mf6_ok and ss.get(f"{KEY}_engine") == "mf6":
-        ss[f"{KEY}_engine"] = "eigen"  # e.g. a project saved where MODFLOW 6 was installed
-    values["engine"] = st.radio(
-        "Rekenkern", list(ENGINE_LABEL), format_func=ENGINE_LABEL.get, key=f"{KEY}_engine",
-        disabled=not mf6_ok,
-        help="Eigen solver: snel, rekent dezelfde vergelijkingen als MODFLOW 6. MODFLOW 6: "
-        "het model wordt echt door MODFLOW 6 (USGS) gerekend; langzamer. Zie de pagina "
-        "'Rekenkern MODFLOW 6' voor de verschillen. " + mf6_msg,
-    )  # fmt: skip
+    if mf6_ok:
+        st.caption(mf6_msg)
+if not mf6_ok:
+    st.sidebar.error(mf6_msg)
 
 step1, step2, step3 = st.tabs(STEPS, key=f"{KEY}_step")
 
@@ -141,10 +136,12 @@ with step3:
     c_btn, c_msg = st.columns([1, 4], vertical_alignment="center")
     clicked |= c_btn.button(
         "Bereken", type="primary", icon=":material/play_arrow:", key=f"{KEY}_calc",
-        width="stretch",
+        width="stretch", disabled=not mf6_ok,
+        help=None if mf6_ok else mf6_msg,
     )  # fmt: skip
 
-if clicked and input_error is None:
+calc_error = None
+if clicked and input_error is None and mf6_ok:
     t0 = time.perf_counter()
     try:
         ss[f"{KEY}_result"] = {
@@ -155,9 +152,15 @@ if clicked and input_error is None:
         }
     except ParamError as err:
         input_error = err
+    except RuntimeError as err:  # MODFLOW 6 missing or without a solution
+        calc_error = str(err)
 
 done = ss.get(f"{KEY}_result")
-if done is None:
+if not mf6_ok:
+    status = ("error", mf6_msg)
+elif calc_error is not None:
+    status = ("error", f"Niet berekend: {calc_error}")
+elif done is None:
     status = ("info", "Nog niet gerekend. Teken de watergangen en klik op **Bereken**.")
 elif current != done["params"]:
     status = (

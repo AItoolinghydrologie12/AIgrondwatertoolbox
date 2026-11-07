@@ -1,0 +1,403 @@
+{
+ "standaard, vaste T": {
+  "index": 0,
+  "budget": {
+   "referentie [m³/d]": {
+    "neerslag": 722.0,
+    "Wetering": -84.249374,
+    "Sloot": -68.957379,
+    "maaiveld": 0.0,
+    "rand": -568.793247,
+    "som (balansfout)": 0.0
+   },
+   "opzet [m³/d]": {
+    "neerslag": 722.0,
+    "Wetering": -46.600338,
+    "Sloot": -69.603838,
+    "maaiveld": 0.0,
+    "rand": -605.795824,
+    "som (balansfout)": 0.0
+   }
+  },
+  "warnings": [
+   "De kleinste spreidingslengte (20 m) is kleiner dan de celgrootte (25 m): het verloop rond de watergangen is grof. De celgrootte-correctie houdt de uitwisseling goed; verklein de cel voor meer detail."
+  ],
+  "inundated": {
+   "referentie": 0,
+   "opzet": 0
+  },
+  "walls": null,
+  "wells": null
+ },
+ "standaard, meebewegende T": {
+  "index": 1,
+  "budget": {
+   "referentie [m³/d]": {
+    "neerslag": 722.0,
+    "Wetering": -77.397855,
+    "Sloot": -64.821338,
+    "maaiveld": 0.0,
+    "rand": -579.780807,
+    "som (balansfout)": -0.0
+   },
+   "opzet [m³/d]": {
+    "neerslag": 722.0,
+    "Wetering": -44.298343,
+    "Sloot": -65.353248,
+    "maaiveld": 0.0,
+    "rand": -612.348409,
+    "som (balansfout)": -0.0
+   }
+  },
+  "warnings": [
+   "De kleinste spreidingslengte (20 m) is kleiner dan de celgrootte (25 m): het verloop rond de watergangen is grof. De celgrootte-correctie houdt de uitwisseling goed; verklein de cel voor meer detail."
+  ],
+  "inundated": {
+   "referentie": 0,
+   "opzet": 0
+  },
+  "walls": null,
+  "wells": null
+ },
+ "deklaag, put pakket 1, kwel, doorlopende rand": {
+  "index": 2,
+  "budget": {
+   "referentie [m³/d]": {
+    "neerslag": 800.0,
+    "Wetering": -370.412003,
+    "Sloot": -12.469952,
+    "bem": 0.0,
+    "kwel onderrand": 782.107596,
+    "maaiveld": 0.0,
+    "rand (doorlopend)": -1199.225641,
+    "rand": 0.0,
+    "som (balansfout)": -0.0
+   },
+   "opzet [m³/d]": {
+    "neerslag": 800.0,
+    "Wetering": 120.925864,
+    "Sloot": -8.906056,
+    "bem": -500.0,
+    "kwel onderrand": 786.046143,
+    "maaiveld": 0.0,
+    "rand (doorlopend)": -1198.065951,
+    "rand": 0.0,
+    "som (balansfout)": -0.0
+   }
+  },
+  "warnings": [
+   "De kleinste spreidingslengte (2 m) is kleiner dan de celgrootte (25 m): het verloop rond de watergangen is grof. De celgrootte-correctie houdt de uitwisseling goed; verklein de cel voor meer detail.",
+   "Sloot: de bodem ligt in Deklaag. De uitwisseling is benaderd (bodem via de rest van die laag naar het pakket eronder); zie Theorie voor de afwijking t.o.v. een x-z doorsnede.",
+   "Pakket 1: in 1 cellen zakt de stijghoogte onder de bovenkant van het pakket (plaatselijk freatisch); de transmissiviteit rekent daar met de natte dikte."
+  ],
+  "inundated": {
+   "referentie": 0,
+   "opzet": 0
+  },
+  "walls": null,
+  "wells": [
+   [
+    500.0,
+    1.1611716556223022,
+    2.09073814217827,
+    4.0076753311520275,
+    2.025481921095995,
+    -17.0
+   ]
+  ]
+ },
+ "zone, rand per laag": {
+  "index": 3,
+  "budget": {
+   "referentie [m³/d]": {
+    "neerslag": 800.0,
+    "Wetering": -169.27742,
+    "Sloot": -96.303469,
+    "maaiveld": 0.0,
+    "rand (doorlopend)": -534.41911,
+    "rand": 0.0,
+    "som (balansfout)": 0.0
+   },
+   "opzet [m³/d]": {
+    "neerslag": 800.0,
+    "Wetering": -105.079983,
+    "Sloot": -100.423053,
+    "maaiveld": 0.0,
+    "rand (doorlopend)": -594.496963,
+    "rand": 0.0,
+    "som (balansfout)": 0.0
+   }
+  },
+  "warnings": [
+   "De kleinste spreidingslengte (20 m) is kleiner dan de celgrootte (25 m): het verloop rond de watergangen is grof. De celgrootte-correctie houdt de uitwisseling goed; verklein de cel voor meer detail."
+  ],
+  "inundated": {
+   "referentie": 0,
+   "opzet": 0
+  },
+  "walls": null,
+  "wells": null
+ },
+ "freatische put, natte dikte 10 -> 7,7 m": {
+  "index": 4,
+  "budget": {
+   "referentie [m³/d]": {
+    "neerslag": 722.0,
+    "Wetering": -149.243415,
+    "Sloot": -93.691249,
+    "bem": 0.0,
+    "maaiveld": 0.0,
+    "rand": -479.065336,
+    "som (balansfout)": -0.0
+   },
+   "opzet [m³/d]": {
+    "neerslag": 722.0,
+    "Wetering": 137.677308,
+    "Sloot": -62.970789,
+    "bem": -200.0,
+    "maaiveld": 0.0,
+    "rand": -596.706519,
+    "som (balansfout)": 0.0
+   }
+  },
+  "warnings": [],
+  "inundated": {
+   "referentie": 0,
+   "opzet": 0
+  },
+  "walls": null,
+  "wells": [
+   [
+    200.0,
+    1.3006198334457415,
+    2.7482478082549364,
+    3.9286741263942826,
+    1.2406168079959032,
+    -5.0
+   ]
+  ]
+ },
+ "put in het zuidoosten, RD-locatie (rijvolgorde MF6)": {
+  "index": 5,
+  "budget": {
+   "referentie [m³/d]": {
+    "neerslag": 722.0,
+    "Wetering": -77.397855,
+    "Sloot": -64.821338,
+    "bem": 0.0,
+    "maaiveld": 0.0,
+    "rand": -579.780807,
+    "som (balansfout)": -0.0
+   },
+   "opzet [m³/d]": {
+    "neerslag": 722.0,
+    "Wetering": -43.932677,
+    "Sloot": -64.158435,
+    "bem": -100.0,
+    "maaiveld": 0.0,
+    "rand": -513.908889,
+    "som (balansfout)": -0.0
+   }
+  },
+  "warnings": [
+   "De kleinste spreidingslengte (20 m) is kleiner dan de celgrootte (25 m): het verloop rond de watergangen is grof. De celgrootte-correctie houdt de uitwisseling goed; verklein de cel voor meer detail."
+  ],
+  "inundated": {
+   "referentie": 0,
+   "opzet": 0
+  },
+  "walls": null,
+  "wells": [
+   [
+    100.0,
+    0.18508278153570412,
+    0.37057826885756395,
+    3.832961390852786,
+    3.463081400295309,
+    -22.0
+   ]
+  ]
+ },
+ "damwanden: lekkende bouwput tot pakket 1, ondoorlatend scherm freatisch": {
+  "index": 6,
+  "budget": {
+   "referentie [m³/d]": {
+    "neerslag": 722.0,
+    "Wetering": -77.418722,
+    "Sloot": -64.25321,
+    "bem": 0.0,
+    "maaiveld": 0.0,
+    "rand": -580.328067,
+    "som (balansfout)": -0.0
+   },
+   "opzet [m³/d]": {
+    "neerslag": 722.0,
+    "Wetering": -36.264728,
+    "Sloot": -58.176888,
+    "bem": -150.0,
+    "maaiveld": 0.0,
+    "rand": -477.558384,
+    "som (balansfout)": 0.0
+   }
+  },
+  "warnings": [
+   "De kleinste spreidingslengte (20 m) is kleiner dan de celgrootte (25 m): het verloop rond de watergangen is grof. De celgrootte-correctie houdt de uitwisseling goed; verklein de cel voor meer detail."
+  ],
+  "inundated": {
+   "referentie": 0,
+   "opzet": 0
+  },
+  "walls": [
+   [
+    0.0,
+    7.400281996871367
+   ],
+   [
+    0.0,
+    134.5997180036189
+   ],
+   [
+    0.0,
+    0.0
+   ]
+  ],
+  "wells": [
+   [
+    150.0,
+    1.255306429146978,
+    1.5335496601297676,
+    3.9295992066236733,
+    2.4506150808594653,
+    -22.0
+   ]
+  ]
+ },
+ "damwand in een deklaag tot pakket 1 (dunne MF6-toplaag)": {
+  "index": 7,
+  "budget": {
+   "referentie [m³/d]": {
+    "neerslag": 722.0,
+    "Wetering": -163.742304,
+    "Sloot": -7.904987,
+    "bem": 0.0,
+    "maaiveld": 0.0,
+    "rand": -550.352709,
+    "som (balansfout)": -0.0
+   },
+   "opzet [m³/d]": {
+    "neerslag": 722.0,
+    "Wetering": 281.975027,
+    "Sloot": -6.42893,
+    "bem": -300.0,
+    "maaiveld": 0.0,
+    "rand": -697.546097,
+    "som (balansfout)": -0.0
+   }
+  },
+  "warnings": [
+   "De kleinste spreidingslengte (2 m) is kleiner dan de celgrootte (25 m): het verloop rond de watergangen is grof. De celgrootte-correctie houdt de uitwisseling goed; verklein de cel voor meer detail.",
+   "Sloot: de bodem ligt in Deklaag. De uitwisseling is benaderd (bodem via de rest van die laag naar het pakket eronder); zie Theorie voor de afwijking t.o.v. een x-z doorsnede.",
+   "Pakket 1: in 13 cellen zakt de stijghoogte onder de bovenkant van het pakket (plaatselijk freatisch); de transmissiviteit rekent daar met de natte dikte."
+  ],
+  "inundated": {
+   "referentie": 0,
+   "opzet": 0
+  },
+  "walls": [
+   [
+    0.0,
+    0.45849901867330245
+   ],
+   [
+    0.0,
+    287.08081008155347
+   ]
+  ],
+  "wells": [
+   [
+    300.0,
+    1.4339759465927995,
+    2.0025080008151193,
+    3.9131909826860545,
+    2.0077232055854193,
+    -17.0
+   ]
+  ]
+ },
+ "6 pakketten, put in pakket 6, kwel": {
+  "index": 8,
+  "budget": {
+   "referentie [m³/d]": {
+    "neerslag": 722.0,
+    "Wetering": -21.900291,
+    "Sloot": -12.179549,
+    "bem": 0.0,
+    "kwel onderrand": 865.240253,
+    "maaiveld": 0.0,
+    "rand": -1553.160414,
+    "som (balansfout)": 0.0
+   },
+   "opzet [m³/d]": {
+    "neerslag": 722.0,
+    "Wetering": 3.840539,
+    "Sloot": -12.309657,
+    "bem": -800.0,
+    "kwel onderrand": 930.441662,
+    "maaiveld": 0.0,
+    "rand": -843.972544,
+    "som (balansfout)": 0.0
+   }
+  },
+  "warnings": [
+   "De kleinste spreidingslengte (3 m) is kleiner dan de celgrootte (25 m): het verloop rond de watergangen is grof. De celgrootte-correctie houdt de uitwisseling goed; verklein de cel voor meer detail.",
+   "Wetering: de bodem ligt in Deklaag. De uitwisseling is benaderd (bodem via de rest van die laag naar het pakket eronder); zie Theorie voor de afwijking t.o.v. een x-z doorsnede.",
+   "Sloot: de bodem ligt in Deklaag. De uitwisseling is benaderd (bodem via de rest van die laag naar het pakket eronder); zie Theorie voor de afwijking t.o.v. een x-z doorsnede."
+  ],
+  "inundated": {
+   "referentie": 0,
+   "opzet": 0
+  },
+  "walls": null,
+  "wells": [
+   [
+    800.0,
+    0.7275841341192959,
+    1.2840705960848753,
+    3.8815017649219334,
+    2.5974311690370016,
+    -171.0
+   ]
+  ]
+ },
+ "bodem per cel (legger), deklaag": {
+  "index": 9,
+  "budget": {
+   "referentie [m³/d]": {
+    "neerslag": 722.0,
+    "Wetering": -161.068769,
+    "Sloot": -28.723558,
+    "maaiveld": 0.0,
+    "rand": -532.207672,
+    "som (balansfout)": -0.0
+   },
+   "opzet [m³/d]": {
+    "neerslag": 722.0,
+    "Wetering": 172.761414,
+    "Sloot": -37.245937,
+    "maaiveld": 0.0,
+    "rand": -857.515477,
+    "som (balansfout)": -0.0
+   }
+  },
+  "warnings": [
+   "De kleinste spreidingslengte (2 m) is kleiner dan de celgrootte (25 m): het verloop rond de watergangen is grof. De celgrootte-correctie houdt de uitwisseling goed; verklein de cel voor meer detail.",
+   "Sloot: de bodem ligt in Deklaag. De uitwisseling is benaderd (bodem via de rest van die laag naar het pakket eronder); zie Theorie voor de afwijking t.o.v. een x-z doorsnede."
+  ],
+  "inundated": {
+   "referentie": 0,
+   "opzet": 0
+  },
+  "walls": null,
+  "wells": null
+ }
+}

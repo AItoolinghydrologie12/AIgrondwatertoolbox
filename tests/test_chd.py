@@ -102,27 +102,24 @@ def test_object_in_a_chd_cell_gives_warning() -> None:
     assert res.budget.loc["put", "opzet [m³/d]"] == pytest.approx(-50.0)
 
 
-def test_chd_with_mf6_engine_equals_own_solver() -> None:
-    """CHD groups (also on the fixed outer ring) as separate MF6 CHD packages: same heads and
-    budget rows. Skipped without MODFLOW 6."""
-    from gwproducten.products.peilopzet_grid import mf6
-
-    if not mf6.available():
-        pytest.skip("MODFLOW 6 niet geïnstalleerd")
+def test_chd_groups_hold_their_heads_and_balance() -> None:
+    """CHD groups (also on the fixed outer ring) as separate MF6 CHD packages: the cells keep
+    their heads, each group has its own budget row and the budget closes."""
     par = dataclasses.replace(
         p3.Params(),
         chd=(p3.ChdGroup("plas", tuple((r, c) for r in range(15, 20) for c in range(0, 6)),
                          "pakket1", 3.0, 3.3),
              p3.ChdGroup("kanaal", column(39, 40), "freatisch", 3.6, 3.6)),
     )  # fmt: skip
-    own = p3.compute(par)
-    ext = p3.compute(dataclasses.replace(par, engine="mf6"))
-    assert ext.engine == "mf6"
-    assert np.max(np.abs(own.heads_new - ext.heads_new)) < 1e-5
+    res = p3.compute(par)
+    keys = list(res.node_labels)
+    plas = res.heads_new[keys.index("pakket1"), 15:20, 0:6]
+    np.testing.assert_allclose(plas, 3.3, atol=1e-9)
+    np.testing.assert_allclose(res.heads_new[keys.index("freatisch"), :, 39], 3.6, atol=1e-9)
     for name in ("plas", "kanaal", "rand"):
-        assert ext.budget.loc[name, "opzet [m³/d]"] == pytest.approx(
-            own.budget.loc[name, "opzet [m³/d]"], rel=1e-4, abs=1e-3
-        )
+        assert name in res.budget.index
+    scale = res.budget.abs().to_numpy().max()
+    assert abs(res.budget.loc["som (balansfout)", "opzet [m³/d]"]) < 1e-4 * scale
 
 
 @pytest.mark.parametrize(
