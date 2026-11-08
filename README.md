@@ -73,9 +73,17 @@ app/                    Streamlit: Home.py, pages/, gedeelde UI-bouwstenen
 tests/                  validatie per product + rooktest van alle pagina's
 ```
 
-Elk product heeft dezelfde opbouw: schematische doorsnede, invoer in de zijbalk
-(ondergrond / watergangen / ingreep / numeriek) en de tabs *Resultaat · Theorie · Aannames ·
-Validatie · Export*.
+De pagina werkt in drie stappen (tabbladen): *1 Ondergrond en maaiveld* (locatie,
+modelgebied, lagen met doorsnede, zones, maaiveld/drainage, modelrand/kwel), *2 Watergangen
+tekenen* en *3 Berekenen en resultaat* (kerngetallen en de tabbladen *Resultaat · Theorie ·
+Aannames · Validatie · Export*). De zijbalk is het bedieningspaneel: **Bereken**, de status,
+een voortgangslijst per stap, project opslaan/laden en *Beoordeling en numeriek*.
+
+UI-code in `app/`: `toolbox_page.py` (regie van de pagina), `subsoil_ui.py` (stap 1),
+`draw_ui.py` (stap 2), `result_ui.py` (stap 3), `tables_ui.py` (bewerkbare tabellen),
+`labels.py` (alle termen, eenheden, notaties en hulpteksten van stap 2), `status_ui.py`
+(status en voortgang) en `ui_common.py` (o.a. `friendly_errors`: een onverwachte fout wordt
+een Nederlandse melding met de details ingeklapt). Thema: `.streamlit/config.toml`.
 
 ## Afhankelijkheden (vastgepind in `pyproject.toml` en `requirements.txt`)
 
