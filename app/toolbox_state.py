@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import streamlit as st
-from grid_ui import absolute_lines, to_cells, wall_faces, wc_geometry
+from grid_ui import absolute_lines, to_cells, wall_faces, wc_geometry_cached
 from streamlit.errors import StreamlitAPIException
 
 from gwproducten.core.layers import LayerStack
@@ -113,7 +113,7 @@ class Grid:
     def watercourses(self) -> list[dict[str, Any]]:
         out = []
         for wc in ss[f"{KEY}_wcs"]:
-            cells, lengths, offsets = wc_geometry(wc, self.cell, self.nrow, self.ncol)
+            cells, lengths, offsets = wc_geometry_cached(wc, self.cell, self.nrow, self.ncol)
             lines = absolute_lines(wc, self.ncol * self.cell, self.nrow * self.cell)
             out.append(
                 {

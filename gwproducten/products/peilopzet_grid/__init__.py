@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -20,12 +22,10 @@ from gwproducten.numeric.grid2d import (
     MIN_SATURATED_FRACTION,
     Barrier,
     Convertible,
-    Factorization,
     FixedHeads,
     FluxBoundary,
     HeadBoundary,
     grid_resistance,
-    solve_grid,
 )
 from gwproducten.products._layered import Ditch, Subsoil
 from gwproducten.products.peilopzet_grid.schematic import schematic
@@ -37,7 +37,7 @@ META = {
     "regime": "stationair",
     "methoden_kort": ["numeriek rooster (bovenaanzicht)"],
     "methoden": [
-        "numeriek: eindige volumes in bovenaanzicht, quasi-3D lagen, RIV/DRN-randen (Picard)",
+        "numeriek: MODFLOW 6 in bovenaanzicht, quasi-3D lagen, RIV/DRN-randen",
         "putten (WEL), algemene stijghoogteranden (GHB) en kwel via de onderrand",
         "zones met eigen lagenopbouw en maaiveld (harmonisch gemiddelde tussen cellen)",
         "damwanden op celranden (weerstand in serie, als het HFB-pakket van MODFLOW 6)",
@@ -47,13 +47,12 @@ META = {
 THEORY = (Path(__file__).parent / "theory.md").read_text(encoding="utf-8")
 
 MAX_CELLS_PER_SIDE = 100
-# With many computational layers the exact LU grows fast; these smaller grids keep the largest
-# run near that of 100 x 100 x 5 layers (~2 s, ~0.35 GB; measured 2026-11-02).
+# With many computational layers a smaller grid keeps the run time of the largest model near
+# that of 100 x 100 x 5 layers (choice of Job, 2026-11-02).
 MAX_CELLS_BY_NODES = {6: 85, 7: 75}
 MAX_ZONES = 5
 BOUNDARIES = ("vast", "doorlopend", "gesloten", "per_laag")
 RING_KINDS = ("vast", "doorlopend", "gesloten")  # per layer with "per_laag"
-ENGINES = ("eigen", "mf6")
 RING_GHB = "rand (doorlopend)"
 RESERVED_NAMES = (
     "neerslag", "buisdrainage", "maaiveld", "rand", RING_GHB, "kwel onderrand", "basis",
@@ -221,7 +220,6 @@ class Params:
     threshold: float = param(0.05, "m", "Grens verhoging", 0.001, 1.0)
     grid_correction: bool = True
     convertible: bool = True  # T follows the saturated thickness (MODFLOW 6 convertible)
-    engine: str = "eigen"  # calculation engine: "eigen" (own solver) or "mf6" (MODFLOW 6)
 
     @property
     def nrow(self) -> int:
@@ -237,8 +235,6 @@ class Params:
             errors.append(
                 f"Dit product ondersteunt maximaal {MAX_AQUIFERS} watervoerende pakketten."
             )
-        if self.engine not in ENGINES:
-            errors.append(f"Rekenkern moet een van {', '.join(ENGINES)} zijn (nu '{self.engine}').")
         if self.boundary not in BOUNDARIES:
             errors.append(
                 f"Modelrand moet een van {', '.join(BOUNDARIES)} zijn (nu '{self.boundary}')."
@@ -603,8 +599,7 @@ class Result:
     well_drawdown: np.ndarray | None = None  # (n_nodes, nrow, ncol) by the wells (opzet) [m]
     wells: pd.DataFrame | None = None  # per well: cell average and head in the well
     walls: pd.DataFrame | None = None  # per wall and layer: flow through the wall [m3/d]
-    engine: str = "eigen"  # engine that produced the result (after a possible fallback)
-    engine_note: str = ""  # e.g. "MODFLOW 6 (standaard)" or the reason for a fallback
+    engine_note: str = ""  # e.g. "MODFLOW 6.7.0 (standaard)"
     seconds: float = 0.0  # calculation time [s]
 
 
@@ -623,19 +618,24 @@ def _well_table(params: Params, nodes, geometry, ref, new, drawdown) -> pd.DataF
     rows = []
     for g in params.wells:
         j = keys.index(g.layer)
-        for r, c in g.cells:
+        q_ref = -ref.well_rates.get(g.name, np.full(len(g.cells), -g.q_ref))
+        q_new = -new.well_rates.get(g.name, np.full(len(g.cells), -g.q_new))
+        for k, (r, c) in enumerate(g.cells):
             dry = bool(new.dry[j, r, c] or ref.dry[j, r, c])
             T_ref, T_new = ref.transmissivity[j, r, c], new.transmissivity[j, r, c]
-            h_ref = ref.heads[j, r, c] + well_correction(g.q_ref, T_ref, params.cell, g.radius)
-            h_new = new.heads[j, r, c] + well_correction(g.q_new, T_new, params.cell, g.radius)
+            corr_ref = well_correction(float(q_ref[k]), T_ref, params.cell, g.radius)
+            corr_new = well_correction(float(q_new[k]), T_new, params.cell, g.radius)
+            h_ref = ref.heads[j, r, c] + corr_ref
+            h_new = new.heads[j, r, c] + corr_new
             s_cell = float(drawdown[j, r, c]) if drawdown is not None else np.nan
-            s_well = s_cell - well_correction(g.q_new, T_new, params.cell, g.radius)
+            s_well = s_cell - corr_new
             rows.append(
                 {
                     "Put": g.name,
                     "Laag": nodes[j].label,
                     "Cel (rij, kolom)": f"{r}, {c}",
                     "Q opzet [m³/d]": g.q_new,
+                    "Q opzet geleverd [m³/d]": float(q_new[k]),
                     "Verlaging cel [m]": s_cell,
                     "Verlaging in put [m]": np.nan if dry else s_well,
                     "h put ref [m NAP]": np.nan if dry else h_ref,
@@ -864,36 +864,13 @@ def compute(params: Params) -> Result:
     convertible = _convertible(params)
 
     t_start = time.perf_counter()
-    # Own solver: both runs share the grid matrix; the opzet run starts from the reference.
-    factorization = Factorization()
 
     def boundaries(run: str) -> list[HeadBoundary]:
         return _boundaries(params, sub, run, cond) + ([ring_ghb] if ring_ghb else [])
 
-    def solve_run(run: str, with_wells: bool = True, start=None):
-        """``start``: earlier run whose states (and transmissivities) are the first guess."""
-        return solve_grid(
-            T if start is None else list(start.transmissivity),
-            c, params.nrow, params.ncol, params.cell, params.recharge, boundaries(run),
-            fixed_head=fixed,
-            fluxes=_wells(params, sub, run) if with_wells else (),
-            initial_active=None if start is None else start.active,
-            factorization=factorization, convertible=convertible, barriers=_barriers(params, run),
-            fixed_cells=_fixed_cells(params, sub, run),
-        )  # fmt: skip
-
-    # the opzet run without wells gives the (nonlinear) well drawdown
-    nonlinear = any(cv is not None for cv in convertible) or params.engine == "mf6"
-    need_no_wells = nonlinear and any(g.q_new != 0 for g in params.wells)
-    engine, engine_note, sols = "eigen", "eigen solver", None
-    if params.engine == "mf6":
-        sols, engine_note = _mf6_runs(params, boundaries, sub, fixed, T, convertible, need_no_wells)
-        engine = "mf6" if sols else "eigen"
-    if sols is None:
-        sols = {"ref": solve_run("ref")}
-        sols["new"] = solve_run("new", start=sols["ref"])
-        if need_no_wells:
-            sols["no_wells"] = solve_run("new", with_wells=False, start=sols["ref"])
+    # the opzet run without wells gives the (nonlinear) drawdown by the wells
+    need_no_wells = any(g.q_new != 0 for g in params.wells)
+    sols, engine_note = _mf6_runs(params, boundaries, sub, fixed, T, convertible, need_no_wells)
     ref, new = sols["ref"], sols["new"]
 
     rows = [
@@ -975,9 +952,6 @@ def compute(params: Params) -> Result:
                     "Theorie voor de afwijking t.o.v. een x-z doorsnede."
                 )
                 break
-    for name, s in sols.items():
-        if not s.converged:
-            warnings.append(f"Iteratie RIV/DRN niet geconvergeerd ({name}); resultaat onzeker.")
     inundated = {
         "referentie": int(ref.active["maaiveld"].sum()),
         "opzet": int(new.active["maaiveld"].sum()),
@@ -1001,10 +975,8 @@ def compute(params: Params) -> Result:
 
     heads_ref, heads_new = shown(ref), shown(new)
     well_drawdown = None
-    if "no_wells" in sols:  # nonlinear: drawdown = difference with the run without wells
+    if "no_wells" in sols:  # drawdown = difference with the run without wells
         well_drawdown = shown(sols["no_wells"]) - heads_new
-    elif new.flux_response is not None:
-        well_drawdown = -new.flux_response  # linear: exact response, drawdown positive
     for j, node in enumerate(nodes):
         if j < len(convertible) and convertible[j] is not None:
             n_dry = int(np.maximum(ref.dry[j], new.dry[j]).sum())
@@ -1046,6 +1018,27 @@ def compute(params: Params) -> Result:
                     f"({thick:g} m). De transmissiviteit blijft in het model vast; de werkelijke "
                     "verlaging is dan groter."
                 )
+    held: dict[str, int] = {}
+    for sol in sols.values():
+        for name, n in sol.fixed_t_groups.items():
+            held[name] = max(held.get(name, 0), n)
+    for name, n in held.items():
+        warnings.append(
+            f"{name}: in {n} cellen ligt het peil (of de bodem) onder de onderkant van de laag. "
+            "MODFLOW 6 staat dat bij een meebewegende transmissiviteit niet toe; in die cellen "
+            "rekent het model daarom met een vaste transmissiviteit (kh × laagdikte)."
+        )
+    for g in params.wells:
+        for stage, sol, q in (("referentie", ref, g.q_ref), ("opzet", new, g.q_new)):
+            got = -float(np.sum(sol.well_rates.get(g.name, [-q * len(g.cells)])))
+            asked = q * len(g.cells)
+            if abs(got - asked) > 1e-3 * max(abs(asked), 1.0):
+                warnings.append(
+                    f"{g.name}: de laag valt rond de put droog en kan het gevraagde debiet niet "
+                    f"leveren. In de {stage} levert de put {got:.0f} van de gevraagde "
+                    f"{asked:.0f} m³/d (MODFLOW 6 verlaagt het debiet: AUTO_FLOW_REDUCE). "
+                    "Waterbalans en verlaging horen bij het geleverde debiet."
+                )
     wells = None
     if params.wells:
         wells = _well_table(params, nodes, geometry, ref, new, well_drawdown)
@@ -1079,7 +1072,6 @@ def compute(params: Params) -> Result:
         well_drawdown=well_drawdown,
         wells=wells,
         walls=walls,
-        engine=engine,
         engine_note=engine_note,
         seconds=time.perf_counter() - t_start,
     )
@@ -1107,28 +1099,33 @@ def _wall_table(params: Params, sols: dict) -> pd.DataFrame:
 
 
 def _mf6_runs(params, boundaries, sub, fixed, T, convertible, need_no_wells):
-    """Reference, opzet (and opzet without wells) with MODFLOW 6 in a temporary folder that
-    is removed afterwards. Returns (solutions, note); solutions None on a fallback."""
+    """Reference, opzet (and opzet without wells) with MODFLOW 6, side by side, each in its
+    own temporary folder that is removed afterwards. Returns (solutions, note); RuntimeError
+    with a Dutch message when MODFLOW 6 is missing or fails."""
     from gwproducten.products.peilopzet_grid import mf6
 
     if not mf6.available():
-        return None, "MODFLOW 6 is hier niet beschikbaar; berekend met de eigen solver."
+        raise RuntimeError(mf6.NOT_AVAILABLE)
     runs = [("ref", "ref", True), ("new", "new", True)]
     if need_no_wells:
         runs.append(("no_wells", "new", False))
-    sols, newton_used = {}, False
-    try:
-        with tempfile.TemporaryDirectory(prefix="gwt_mf6_") as tmp:
-            for key, stage, with_wells in runs:
-                sols[key], newton = mf6.solve(
-                    params, boundaries(stage),
-                    _wells(params, sub, stage) if with_wells else [], fixed, T, convertible,
-                    Path(tmp) / key, _barriers(params, stage), _fixed_cells(params, sub, stage),
-                )  # fmt: skip
-                newton_used |= newton
-    except (RuntimeError, OSError) as err:
-        return None, f"{err} Resultaat berekend met de eigen solver."
-    return sols, f"MODFLOW {mf6.version()} ({'Newton' if newton_used else 'standaard'})"
+    with tempfile.TemporaryDirectory(prefix="gwt_mf6_") as tmp:
+
+        def one(run):
+            key, stage, with_wells = run
+            return mf6.solve(
+                params, boundaries(stage), _wells(params, sub, stage) if with_wells else [],
+                fixed, T, convertible, Path(tmp) / key, _barriers(params, stage),
+                _fixed_cells(params, sub, stage),
+            )  # fmt: skip
+
+        workers = max(1, min(len(runs), os.cpu_count() or 1))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            done = list(pool.map(one, runs))
+    sols = {key: sol for (key, _, _), (sol, _) in zip(runs, done, strict=True)}
+    order = [label for label, _, _ in mf6.ATTEMPTS]
+    used = max((label for _, label in done), key=order.index)
+    return sols, f"MODFLOW {mf6.version()} ({used})"
 
 
 def strip_benchmark(stack: LayerStack, cell: float, correction: bool) -> tuple[float, float]:

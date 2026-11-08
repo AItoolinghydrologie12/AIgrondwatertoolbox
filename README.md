@@ -11,7 +11,7 @@ voor hydrologen, adviseurs en reviewers van bemalings- en peilbesluitrapportages
 | Grondwatertoolbox (rooster, numeriek) | stationair | numeriek rooster in bovenaanzicht (cellen 10–50 m, max 100 × 100 cellen: tot 5 km bij 50 m), watergangen tekenen per cel, zones met eigen lagen en maaiveld, RIV/DRN, putten (WEL), GHB-groepen, damwanden (HFB), kwel via de onderrand, modelrand per laag, buisdrainage per cel, maaivelddrainage, neerslagoverschot |
 
 **Ondergrond:** kies de bovenkant (deklaag met freatisch niveau, of freatisch zandpakket) en
-1–4 watervoerende pakketten met scheidende lagen ertussen. **Watergangen** teken je op de kaart
+1–6 watervoerende pakketten met scheidende lagen ertussen. **Watergangen** teken je op de kaart
 en geef je op met peil, bodem, breedte en intreeweerstand; de lagen waarop ze aansluiten
 volgen uit de geometrie (open wanden).
 
@@ -49,18 +49,12 @@ dat een fout over het uitvoeringsbeleid, gebruik dan de volledige paden zoals hi
 | Formatteren | `.venv\Scripts\python -m ruff format .` | bij opslaan (ruff-extensie) |
 | App starten | `.venv\Scripts\python -m streamlit run app/Home.py --server.address localhost` | taak **Start app**, of F5 → *Start app* |
 
-**MODFLOW 6 installeren (Windows, eenmalig).** flopy komt mee met `.[app]`; het programma
-`mf6.exe` haal je zo op:
-
-```powershell
-.venv\Scripts\get-modflow.exe :flopy --subset mf6
-.venv\Scripts\python -m pytest tests/test_mf6_comparison.py -v
-```
-
-`get-modflow` downloadt `mf6.exe` van GitHub (MODFLOW-ORG/executables) naar
-`%LOCALAPPDATA%\flopy\bin`. Zonder `mf6` rekent de app met de eigen solver en worden de
-MF6-tests overgeslagen. Op een Linux-server (Streamlit Cloud) installeert de app `mf6` zelf
-bij de eerste keer (zie *Veiligheid*).
+**MODFLOW 6** is de rekenkern. De app zoekt `mf6` op het PATH, in
+`%LOCALAPPDATA%\grondwatertoolbox\mf6-29.0` en in `%LOCALAPPDATA%\flopy\bin` (een eerdere
+installatie met `get-modflow`). Staat hij nergens, dan haalt de app bij de eerste berekening
+zelf MODFLOW 6.7.0 op (internet nodig, ± 50 MB; vaste release, SHA-256 gecontroleerd, zie
+*Veiligheid*). Zonder `mf6` rekent de app niet en meldt dat; de MF6-tests worden dan
+overgeslagen.
 
 De app opent op <http://localhost:8501> (alleen lokaal bereikbaar door `--server.address localhost`).
 VS Code: open de map, installeer de aanbevolen extensies (Python, Ruff) en kies de interpreter
@@ -79,9 +73,17 @@ app/                    Streamlit: Home.py, pages/, gedeelde UI-bouwstenen
 tests/                  validatie per product + rooktest van alle pagina's
 ```
 
-Elk product heeft dezelfde opbouw: schematische doorsnede, invoer in de zijbalk
-(ondergrond / watergangen / ingreep / numeriek) en de tabs *Resultaat · Theorie · Aannames ·
-Validatie · Export*.
+De pagina werkt in drie stappen (tabbladen): *1 Ondergrond en maaiveld* (locatie,
+modelgebied, lagen met doorsnede, zones, maaiveld/drainage, modelrand/kwel), *2 Watergangen
+tekenen* en *3 Berekenen en resultaat* (kerngetallen en de tabbladen *Resultaat · Theorie ·
+Aannames · Validatie · Export*). De zijbalk is het bedieningspaneel: **Bereken**, de status,
+een voortgangslijst per stap, project opslaan/laden en *Beoordeling en numeriek*.
+
+UI-code in `app/`: `toolbox_page.py` (regie van de pagina), `subsoil_ui.py` (stap 1),
+`draw_ui.py` (stap 2), `result_ui.py` (stap 3), `tables_ui.py` (bewerkbare tabellen),
+`labels.py` (alle termen, eenheden, notaties en hulpteksten van stap 2), `status_ui.py`
+(status en voortgang) en `ui_common.py` (o.a. `friendly_errors`: een onverwachte fout wordt
+een Nederlandse melding met de details ingeklapt). Thema: `.streamlit/config.toml`.
 
 ## Afhankelijkheden (vastgepind in `pyproject.toml` en `requirements.txt`)
 
@@ -93,34 +95,38 @@ Validatie · Export*.
 | streamlit | de webapp |
 | kaleido | PNG-export van figuren; heeft Chrome nodig (bij ontbreken: `plotly_get_chrome`, of gebruik het camera-icoon in de figuur) |
 | pytest, ruff | tests en lint/format (alleen ontwikkeling) |
-| flopy (+ matplotlib, vereist door flopy) | MODFLOW 6 als tweede rekenkern: modelbestanden schrijven, draaien en uitlezen |
+| streamlit-folium, folium | locatiekaart: PDOK-tegels in de browser, klik = middelpunt (vloeiend slepen en zoomen, geen kaartbeelden via de server) |
 | requests, pillow | kaartgegevens voor een modellocatie (PDOK, REGIS): webverzoeken en kaartbeelden/AHN-raster; beide zaten al in de omgeving via streamlit |
 
-De app rekent standaard met een eigen solver; MODFLOW 6 (via flopy) is de tweede rekenkern en
-de referentie voor de tests.
+De app rekent met MODFLOW 6. De invoerbestanden schrijft de app zelf (gewone MF6-tekstinvoer)
+en de stijghoogten en waterbalans leest hij zelf terug; flopy is daarvoor niet nodig.
 
 ## Rekenmethode en verantwoording
 
-De Grondwatertoolbox heeft **twee rekenkernen** die dezelfde vergelijkingen oplossen:
+De Grondwatertoolbox rekent met **MODFLOW 6** (USGS). De app zet de schematisering om in
+een MF6-model: elke laag een MF6-modellaag (scheidende lagen met K33 = D/c), watergangen,
+drains, GHB-groepen, putten, CHD-groepen en damwanden elk als eigen pakket, met conductances
+die de app zelf berekent. Referentie en opzet (en bij putten de opzet zonder putten, voor de
+verlaging door de putten) rekenen naast elkaar; 100 × 100 cellen × 4 pakketten kost ca. 1 s.
+Per run:
 
-- **eigen solver** (standaard): een numerieke oplosser in Python (numpy/scipy), snel;
-- **MODFLOW 6** (USGS): de app bouwt een MF6-model met flopy, laat `mf6` rekenen en leest
-  stijghoogten en waterbalans terug. Eerst de standaardformulering; bij droogvallende cellen
-  of geen convergentie Newton; lukt ook dat niet, dan rekent de eigen solver en meldt de app
-  dat.
+1. standaardformulering;
+2. bij droogvallende cellen of geen convergentie: Newton;
+3. lukt ook dat niet en zijn er putten: Newton met **AUTO_FLOW_REDUCE** (de put levert
+   minder als zijn cel droogvalt; keuze Job). De app meldt het geleverde debiet en de
+   puttabel toont gevraagd en geleverd.
 
-Kiezen: zijbalk *Beoordeling en numeriek* → **Rekenkern**. Het resultaat toont altijd waarmee
-gerekend is. De pagina **Rekenkern MODFLOW 6** legt de verschillen uit en rekent je model met
-beide kernen; onder *Export* staat het MODFLOW 6-model als zip. In beide gevallen maakt de app
-zelf de invoer (conductances van watergangen, doorlopende rand) en de putstijghoogte
-(Peaceman). De volledige afleiding met formules staat in
-de app onder **Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`).
+Het resultaat toont welke stap gebruikt is. Onder *Export* staat het MF6-model als zip:
+precies de bestanden waarmee de app rekende. De putstijghoogte (Peaceman) en de
+conductances berekent de app zelf. De volledige afleiding met formules staat in de app onder
+**Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`).
 
 **Waar wat staat in de code**
 
 | Onderdeel | Bestand |
 |---|---|
-| Rooster, matrix, randvoorwaarden, Picard-iteratie, massabalans | `gwproducten/numeric/grid2d.py` |
+| MODFLOW 6-model schrijven, draaien en uitlezen; installatie van `mf6` | `gwproducten/products/peilopzet_grid/mf6.py` |
+| Randgroepen, damwanden, natte dikte (bouwstenen) | `gwproducten/numeric/grid2d.py` |
 | Schematisering, zones, conductance per cel, waarschuwingen | `gwproducten/products/peilopzet_grid/__init__.py` |
 | Lagenopbouw, rekenlagen, weerstand tussen lagen (incl. kv/kh) | `gwproducten/core/layers.py` |
 | Aansluiting watergang op de lagen (natte omtrek, bodem in klei) | `gwproducten/products/_layered.py` |
@@ -128,55 +134,30 @@ de app onder **Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`)
 | Analytische meerlagenoplossing (alleen voor validatie) | `gwproducten/analytic/multilayer.py` |
 | Validatie (vergelijkingen met analytische oplossingen) | `tests/` |
 
-**Vergelijking met MODFLOW 6**
+**Schematisering in MODFLOW 6**
 
-| Onderdeel | Grondwatertoolbox | MODFLOW 6 |
-|---|---|---|
-| Discretisatie | eindige volumes, celcentra, vierkante cellen | idem (DIS, block-centred) |
-| Lagen | één rekenlaag per watervoerend pakket; scheidende lagen als weerstand c (quasi-3D) | scheidende lagen zijn gewone modellagen met lage K33 |
-| Horizontale geleiding | T = kh·D, harmonisch gemiddelde tussen cellen | idem (NPF, vaste T) |
-| Verticale geleiding | A / (½D₁/kv₁ + c + ½D₂/kv₂) | idem bij één laag per pakket en de klei als eigen laag |
-| Transmissiviteit | standaard kh × natte dikte, droge cellen op 1 % van D (uit te zetten: vast) | idem met "convertible" lagen en Newton |
-| Neerslag | vast neerslagoverschot op de bovenste laag | RCH |
-| Watergangen | RIV of DRN: q = C(h_peil − h), RIV begrensd op de bodem | RIV / DRN, zelfde formules |
-| Conductance watergang | **berekend door de app**: natte omtrek per laag, intreeweerstand, radiale weerstand (Ernst), strookweerstand bij een bodem in klei, celgrootte-correctie (De Lange) | moet de gebruiker zelf opgeven |
-| Buisdrainage, maaivelddrainage | DRN op drainniveau resp. maaiveld | DRN |
-| Putten | vast debiet per cel en laag; stijghoogte in de put met Peaceman | WEL (stijghoogte in de put: MAW) |
-| Vaste peilen met weerstand, kwel | GHB per celgroep; kwel als GHB op de onderste laag | GHB |
-| Damwanden | op celranden, weerstand c_w in serie met de celconductance (C_w = b̄·Δy/c_w), ondoorlatend = 0 | HFB, zelfde formule |
-| Modelrand | buitenste ring vaste stijghoogte, doorlopend pakket (GHB met C = T·Δy/(Δx/2 + λ)) of gesloten, ook per laag | CHD, GHB (conductance zelf bepalen) of geen-stroming |
-| Aan/uit van RIV/DRN | Picard-iteratie tot geen toestand meer wisselt | idem, binnen de buitenste iteraties van IMS |
-| Lineaire oplosser | directe LU-ontbinding (SuperLU) met hergebruik als preconditioner (PCG, tolerantie 10⁻¹²) | iteratief (IMS: CG/BiCGSTAB met ILU) |
-| Tijd | alleen stationair (referentie en opzet) | stationair en tijdsafhankelijk |
-
-**Belangrijkste verschillen met een MODFLOW 6-model**
-- Geen stroming *langs* scheidende lagen en geen verticale stroming binnen een pakket buiten
-  de ½D/kv-term: elk pakket is één laag (Dupuit). Bij partieel doordringende watergangen
-  vangt de radiale weerstand dat op.
-- **Transmissiviteit volgt de natte dikte** (standaard aan, zoals een MODFLOW 6
-  "convertible" laag): T = kh × (grondwaterstand of bovenkant − onderkant laag). Dat geldt
-  voor het freatisch zandpakket en voor elk pakket waarvan de stijghoogte onder de bovenkant
-  zakt (de app meldt dat). Een cel die droogvalt rekent door met 1 % van de laagdikte, zoals
-  de Newton-methode van MODFLOW 6; de kaart toont daar de onderkant van de laag. Een deklaag
-  van klei houdt een vaste T (die is al heel klein). Verschil met MODFLOW 6: de verticale
-  weerstand blijft op de volle dikte (MF6 zonder VARIABLECV, de standaard) en tussen cellen
-  geldt het harmonisch gemiddelde zonder upstream-weging. Uitgezet (zijbalk *Beoordeling en
-  numeriek*) rekent de app met vaste T = kh · D. Effect: bij peilopzet klein (0,2 m op 5 m
-  freatisch pakket ≈ 4 % meer T); bij putten in een freatisch pakket wordt de verlaging
-  groter dan met vaste T.
-- De uitwisseling met watergangen rekent de app zelf uit (Ernst/De Lange). In MODFLOW hangt
-  dit helemaal af van wat de modelleur als conductance invult.
+| Onderdeel | Hoe |
+|---|---|
+| Discretisatie | DIS, vierkante cellen, rij 1 = noordrand, XORIGIN/YORIGIN = RD-hoek |
+| Lagen | één MF6-laag per watervoerend pakket; scheidende lagen als eigen laag met K33 = D/c; een deklaag als bovenkant wordt een dunne toplaag (1 cm, met de T van de klei) op de klei |
+| Transmissiviteit | standaard *convertible* (ICELLTYPE 1: T = kh × natte dikte), uit te zetten (vast). Een cel met een randpeil onder zijn onderkant houdt een vaste T (MF6 eist dat; keuze Job), met melding |
+| Neerslag | RCH (array) op de bovenste laag |
+| Watergangen | RIV of DRN; conductance **berekend door de app**: natte omtrek per laag, intreeweerstand, radiale weerstand (Ernst, kv/kh), strookweerstand bij een bodem in klei, celgrootte-correctie (De Lange) |
+| Buisdrainage, maaivelddrainage | DRN op drainniveau resp. maaiveld |
+| Putten | WEL per groep; stijghoogte in de put met Peaceman (app); AUTO_FLOW_REDUCE alleen als het anders niet convergeert |
+| Vaste peilen met weerstand, kwel | GHB per groep; kwel als GHB op de onderste laag |
+| Damwanden | HFB, hydraulische karakteristiek 1/c_w (0 = ondoorlatend) |
+| Modelrand | CHD (vast), GHB met C = T·Δy/(Δx/2 + λ) (doorlopend pakket) of gesloten, ook per laag |
+| Waterbalans | uit MF6 (BUDGETCSV, volle precisie) |
 
 **Validatie** (geautomatiseerde tests, `pytest`)
-- **Tegen MODFLOW 6.7** (flopy; elke laag een MF6-modellaag, scheidende lagen met
-  K33 = D/c, dezelfde randgroepen en conductances): stijghoogten in alle lagen gelijk binnen
-  10⁻⁶ m voor het standaardmodel (vaste en meebewegende T), een deklaag met put in pakket 1,
-  kwel en doorlopende rand, een zone met rand per laag, en een freatische put waarbij de natte
-  dikte van 10 naar 7,7 m gaat (MF6 "convertible", standaardformulering). MF6 met Newton
-  wijkt daar tot enkele cm af in de putcel, door de stroomopwaartse weging van de natte dikte
-  (verschil tussen de twee MF6-formuleringen). Bij **droogvallende cellen** wijken app en MF6
-  af: MF6-Newton convergeerde in het testgeval niet, MF6 zonder Newton zet droge cellen uit;
-  de app rekent door met 1 % natte dikte (zie *Bekende beperkingen*).
+- **Referentiegevallen** (`tests/test_mf6_reference.py`): tien modellen (vaste en
+  meebewegende T, deklaag met put en kwel, zone met rand per laag, freatische put, RD-locatie,
+  damwanden, 6 pakketten, bodem per cel) tegen vaste uitkomsten van de vroegere eigen solver,
+  die op 10⁻⁵ m gelijk was aan MODFLOW 6: stijghoogten binnen 10⁻⁵ m, waterbalans per post
+  binnen 10⁻⁵ relatief, dezelfde meldingen.
+- Freatische strook met neerslag tegen Dupuit (binnen 1 cm); te grote put in een dunne laag:
+  geleverd debiet ≈ Dupuit-maximum (factor 1,24).
 - Lange evenwijdige watergangen tegen de analytische meerlagenoplossing (eigenwaarde-aanpak,
   Bruggeman/Hemker): met celgrootte-correctie binnen 0,6 % voor 2 t/m 4 pakketten, ook met
   anisotropie.
@@ -184,25 +165,24 @@ de app onder **Theorie** (bron: `gwproducten/products/peilopzet_grid/theory.md`)
 - Damwand dwars op een strook: exact de extra lengte k·c_w; ingesloten bouwput met een
   ondoorlatende wand tot de dichte basis: buiten de wand geen verlaging; eigen rekenkern
   gelijk aan MODFLOW 6 (HFB) binnen 10⁻⁵ m; de werking van een wand verandert < 2 % van
-  25 naar 12,5 m cellen.
+  25 naar 12,5 m cellen. Alles met MODFLOW 6.
 - Put in een lekkend pakket tegen De Glee: binnen 2 % vanaf 3 cellen van de put.
 - Overgang tussen zones (harmonisch gemiddelde): exact tegen twee pakketdelen in serie.
 - Bodem in een scheidende laag tegen een numerieke x-z doorsnede (zie bekende beperkingen).
 - Radiale weerstand met anisotropie (kv/kh = 1; 0,33; 0,1) tegen een x-z doorsnede: 0–1 %
   afwijking onder een deklaag, 1–5 % bij een freatisch pakket.
-- Massabalans < 10⁻⁸ in alle scenario's; roosterverfijning convergeert naar de analytische
-  oplossing.
+- Massabalans < 10⁻⁶ in alle scenario's (MF6 sluit op 10⁻⁷ m); roosterverfijning
+  convergeert naar de analytische oplossing.
 
 **Bronnen**: Bruggeman (1999), Ernst (1962), De Lange (1999), De Glee (1930), Hemker
 (meerlagensystemen), Harbaugh (2005, MODFLOW-2005: RIV/DRN) en Langevin e.a. (2017,
 *Documentation for the MODFLOW 6 Groundwater Flow Model*, USGS Techniques and Methods
 6-A55). Volledige verwijzingen staan onder **Theorie** in de app.
 
-**MODFLOW 6 en flopy** zijn software van de U.S. Geological Survey, open source en in het
-publieke domein: vrij te gebruiken en te verspreiden, ook beroepsmatig. Bij gebruik
-vermelden: Langevin e.a. (2017, zie boven) en Bakker, M. e.a. (2016), *Scripting MODFLOW
-model development using Python and FloPy*, Groundwater 54(5). De Grondwatertoolbox is geen
-product van en niet goedgekeurd door de USGS.
+**MODFLOW 6** is software van de U.S. Geological Survey, open source en in het publieke
+domein: vrij te gebruiken en te verspreiden, ook beroepsmatig. Bij gebruik vermelden:
+Langevin e.a. (2017, zie boven). De Grondwatertoolbox is geen product van en niet
+goedgekeurd door de USGS.
 
 ## Bekende beperkingen
 
@@ -230,16 +210,12 @@ product van en niet goedgekeurd door de USGS.
   stap 3); na een wijziging blijft het oude resultaat staan met een melding.
 - Het dwarsprofiel (horizontaal, verticaal of een eigen geklikte lijn) is bilineair
   geïnterpoleerd tussen celmiddens; pieken tussen twee celmiddens worden dus afgevlakt.
-- Rekentijd: het grootste rooster (100 × 100 cellen × 2 lagen) ca. 0,2 s per
-  berekening (referentie + opzet); op een gedeelde cloudserver langer.
-- Maximaal 4 pakketten. Met meebewegende transmissiviteit kost een model met
-  droogvallende cellen rond putten meer rekentijd (lokaal ca. 5 s bij 100 × 100 cellen en 4
-  pakketten; zonder droogval ca. 1,5 s). Een cel die tussen nat en droog blijft wisselen wordt
-  per cel gedempt (zoals delta-bar-delta in MF6).
-- **Droogvallende cellen** zijn een benadering: het putdebiet wordt niet verlaagd en het
-  water komt dan van onderen of van opzij. Rond zo'n put is de uitkomst onzeker; de app meldt
-  het aantal droge cellen. Een put die een freatische laag laat droogvallen is in de praktijk
-  meestal niet haalbaar.
+- Rekentijd met MODFLOW 6: 100 × 100 cellen × 4 pakketten ca. 1 s (referentie, opzet en
+  opzet zonder putten naast elkaar); op een gedeelde cloudserver langer.
+- Maximaal 6 pakketten (bij 6 en 7 rekenlagen een kleiner rooster).
+- **Droogvallende cellen**: MODFLOW 6 met Newton. Vraagt een put meer dan de laag kan
+  leveren, dan levert hij minder (AUTO_FLOW_REDUCE, melding en kolom *Q opzet geleverd* in
+  de puttabel); waterbalans en verlaging horen dan bij het geleverde debiet.
 - **Anisotropie** kv/kh per pakket (standaard 0,33): de weerstand tussen pakketten is
   c + D₁/(2kv₁) + D₂/(2kv₂), zoals MODFLOW 6 met één laag per pakket. Ook de radiale
   weerstand van watergangen rekent met kv/kh (Ernst met opgerekte verticale maten).
@@ -261,8 +237,7 @@ product van en niet goedgekeurd door de USGS.
   met putstraal), binnen 1 % van De Glee bij cellen van 10–50 m. Zonder putweerstand (skin)
   en partiële filterlengte. Validatie celgemiddelde: De Glee binnen 2 % vanaf 3 cellen van
   de put. Met vaste T waarschuwt de app bij een verlaging van meer dan 25 % van de
-  freatische laagdikte. Een debiet wordt niet automatisch verlaagd als cellen droogvallen
-  (zoals MODFLOW 6 zonder AUTO_FLOW_REDUCE).
+  freatische laagdikte. Valt de putcel droog, dan levert de put minder (zie hierboven).
 - **GHB-groepen** en **kwel-onderrand**: q = A/c (h_ext − h), altijd actief. Het kwelpeil φ is
   gelijk in referentie en opzet.
 - **Damwanden** liggen op celranden: als lijn langs de celranden (klikpunten op de
@@ -286,8 +261,11 @@ product van en niet goedgekeurd door de USGS.
   leesbaar), als gekleurde cellen, of uit.
 - **Locatie en kaartgegevens** (optioneel, stap 1 → *Locatie*): adres zoeken (PDOK
   Locatieserver) of RD-middelpunt invullen. Daarmee:
-  - **achtergrondkaart** onder teken- en resultaatkaart: topografie (BRT TOP10NL), luchtfoto
-    (Beeldmateriaal Nederland) of AHN-hoogtekaart, elk binnen ca. 1 s.
+  - **locatiekaart**: PDOK-achtergrondkaart grijs als tegels in de browser (Folium); slepen
+    en zoomen zonder wachten, een klik legt het middelpunt. RD ↔ WGS84 met de
+    benaderingsformules van Schreutelkamp & Strang van Hees (< 1 m).
+  - **achtergrondkaart** onder teken- en resultaatkaart: **PDOK grijs**
+    (BRT-Achtergrondkaart; de RD-tegels worden aan elkaar gezet, ca. 0,1–0,6 s), of geen.
   - **watergangen ophalen** (stap 2): TOP10NL (hartlijnen 0,5–3 m en 3–6 m, vlakken > 6 m;
     duikers vallen weg; breedte = midden van de breedteklasse; een vlak wordt lengte per cel =
     oppervlak in de cel / breedte). Kleine greppels ontbreken in TOP10NL.
@@ -337,7 +315,7 @@ product van en niet goedgekeurd door de USGS.
   - het **MODFLOW 6-model** krijgt de RD-hoek linksonder (DIS XORIGIN/YORIGIN) en rij 1 is
     de noordrand, zodat het model in GIS op zijn plek ligt.
   - Bronnen en licenties staan onder elke kaart/tabel: PDOK (Fair Use, gratis, geen key),
-    Kadaster BRT TOP10NL en Beeldmateriaal Nederland (CC BY 4.0), AHN (CC0), REGIS II
+    Kadaster BRT-Achtergrondkaart en TOP10NL (CC BY 4.0), AHN (CC0), REGIS II
     (TNO-GDN, BRO), peilgebieden en legger van WDODelta (open data / openbare legger).
     Elk verzoek betreft één modelgebied, met een timeout en de app-naam als
     User-Agent; adressen worden niet bewaard (alleen de RD-coördinaat in je eigen project).
@@ -363,13 +341,14 @@ product van en niet goedgekeurd door de USGS.
 Goed om te weten:
 
 - De app gebruikt geen geheimen (geen `st.secrets`, API-keys of wachtwoorden).
-- **Veiligheid MODFLOW 6 op de server.** De enige verbinding naar buiten is één download bij
-  de eerste start: het openbare Linux-pakket van MODFLOW 6.7.0 (release 29.0 van
-  MODFLOW-ORG/executables op GitHub), via een vast adres zonder account of token. De app
-  controleert de SHA-256 tegen de waarde in `gwproducten/products/peilopzet_grid/mf6.py`
-  en gebruikt het pakket alleen bij een exacte overeenkomst; alleen `mf6` wordt uitgepakt
-  (± 50 MB, in `~/.cache/grondwatertoolbox`). Mislukt dat, dan rekent de app met de eigen
-  solver. Elke MF6-berekening draait in een eigen tijdelijke map die meteen wordt verwijderd;
+- **Veiligheid MODFLOW 6.** De enige verbinding naar buiten voor MODFLOW 6 is één download
+  bij de eerste start, als `mf6` nog niet aanwezig is: het openbare pakket van MODFLOW 6.7.0
+  (release 29.0 van MODFLOW-ORG/executables op GitHub; `linux.zip` op de server, `win64.zip`
+  op Windows), via een vast adres zonder account of token. De app controleert de SHA-256
+  tegen de waarde in `gwproducten/products/peilopzet_grid/mf6.py` en gebruikt het pakket
+  alleen bij een exacte overeenkomst; alleen `mf6` (`mf6.exe`) wordt uitgepakt (± 50 MB, in
+  `~/.cache/grondwatertoolbox` resp. `%LOCALAPPDATA%\grondwatertoolbox`). Mislukt dat, dan
+  rekent de app niet en meldt dat. Elke MF6-berekening draait in een eigen tijdelijke map die meteen wordt verwijderd;
   er worden geen gegevens van bezoekers bewaard of verstuurd. MODFLOW 6 is publiek domein
   (USGS).
 - `.streamlit/config.toml` bevat bewust geen `[server]`-instellingen; die regelt de cloud.

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import pandas as pd
@@ -41,8 +42,11 @@ def page_header(product_meta: dict[str, Any]) -> None:
     )
 
 
-def number(cls: Any, name: str, default: Any, key: str, step: float | None = None) -> Any:
-    """Number input with label, unit, range and help from the dataclass metadata."""
+def number(
+    cls: Any, name: str, default: Any, key: str, step: float | None = None, help: str | None = None
+) -> Any:
+    """Number input with label, unit, range and help from the dataclass metadata (``help``
+    replaces the help of the metadata)."""
     m = meta(cls, name)
     label = f"{m['label']} [{m['unit']}]" if m["unit"] not in ("", "-") else m["label"]
     if isinstance(default, int) and not isinstance(default, bool):
@@ -56,7 +60,7 @@ def number(cls: Any, name: str, default: Any, key: str, step: float | None = Non
         max_value=None if m["max"] is None else float(m["max"]),
         step=step,
         format="%g",
-        help=m["help"] or None,
+        help=help or m["help"] or None,
         key=key,
     )
 
@@ -163,6 +167,23 @@ def _layer_cards(
                         kh = number(Layer, "k_h", lay.k_h, f"{k}_kh", 0.01)
                 aquitards.append((d, c, kh))
     return aquifers, aquitards
+
+
+@contextmanager
+def friendly_errors() -> Iterator[None]:
+    """Show an unexpected error as a Dutch message with the details folded away, instead of
+    a bare traceback. Streamlit's own reruns/stops are BaseExceptions and pass through."""
+    try:
+        yield
+    except Exception as err:  # noqa: BLE001 - last resort, shown to the user
+        st.error(
+            "Er ging iets mis in de app. Sla je project op (zijbalk → *Project opslaan of "
+            "laden*), ververs de pagina en laad het project weer. Blijft het gebeuren, geef dan "
+            "de technische details hieronder door aan de beheerder van de app.",
+            icon=":material/error:",
+        )
+        with st.expander("Technische details"):
+            st.exception(err)
 
 
 def show_param_error(err: ParamError) -> None:

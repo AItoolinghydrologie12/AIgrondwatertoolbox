@@ -86,7 +86,7 @@ def test_grid_product_profile_modes() -> None:
     at = _toolbox(page, 120)
     at.button(key="p3_calc").click().run()
     assert not at.exception, [e.value for e in at.exception]
-    assert len(at.metric) >= 6  # KPI cards
+    assert len(at.metric) >= 4  # KPI cards
     at.slider(key="p3_ph").set_value(400.0).run()
     assert not at.exception, [e.value for e in at.exception]
     at.session_state["p3_pmode"] = "verticaal"
@@ -469,61 +469,45 @@ def test_grid_product_validation_benchmark_button() -> None:
     assert not at.error, [e.value for e in at.error]
 
 
-def test_grid_product_with_modflow6_engine() -> None:
-    """Engine MODFLOW 6: label 'Berekend met MODFLOW 6', same result as the own solver, and
-    the MF6 model as zip in the export tab. Skipped without flopy/mf6."""
-    from gwproducten.products.peilopzet_grid import mf6
-
-    if not mf6.available():
-        pytest.skip("flopy/mf6 niet geïnstalleerd")
+def test_grid_product_computes_with_modflow6() -> None:
+    """The label 'Berekend met MODFLOW 6' and the MF6 model as zip in the export tab."""
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
     at = _toolbox(page, 180)
     at.button(key="p3_calc").click().run()
-    own = at.session_state["p3_result"]["res"]
-    at.radio(key="p3_engine").set_value("mf6").run()
-    at.button(key="p3_calc").click().run()
     assert not at.exception, [e.value for e in at.exception]
     res = at.session_state["p3_result"]["res"]
-    assert res.engine == "mf6"
-    assert any("Berekend met **MODFLOW 6" in s.value for s in at.success)
-    assert abs(res.heads_new - own.heads_new).max() < 1e-5
+    assert res.engine_note.startswith("MODFLOW 6")
+    assert any("Berekend met **MODFLOW 6" in c.value for c in at.caption)
     at.button(key="p3_mf6zip").click().run()
     assert not at.exception, [e.value for e in at.exception]
     assert at.session_state["p3_mf6zip_for"] == at.session_state["p3_result"]["params"]
 
 
-def test_engine_comparison_page() -> None:
-    """Page 'Rekenkern MODFLOW 6': explanation without a model; with the last model of the
-    Grondwatertoolbox page the comparison button shows tiny differences."""
+def test_grid_product_mf6_failure_is_a_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MODFLOW 6 without a solution: a clear message in step 3, no exception."""
     from gwproducten.products import peilopzet_grid as p3
-    from gwproducten.products.peilopzet_grid import mf6
 
-    page = str(APP / "pages" / "2_Rekenkern_MODFLOW6.py")
+    def fail(params):  # noqa: ANN001, ANN202
+        raise RuntimeError("MODFLOW 6 vindt geen oplossing (test).")
+
+    monkeypatch.setattr(p3, "compute", fail)
+    page = str(APP / "pages" / "1_Grondwatertoolbox.py")
     at = _toolbox(page, 180)
+    at.number_input(key="p3_rch").set_value(0.0011).run()  # not in the run cache
+    at.button(key="p3_calc").click().run()
     assert not at.exception, [e.value for e in at.exception]
-    assert any("Bereken eerst" in i.value for i in at.info)
-    if not mf6.available():
-        pytest.skip("flopy/mf6 niet geïnstalleerd")
-    par = p3.Params()
-    at.session_state["p3_result"] = {"params": par, "res": p3.compute(par), "wcs": []}
-    at.run()
-    at.button(key="p3_cmp").click().run()
-    assert not at.exception, [e.value for e in at.exception]
-    assert float(at.metric[0].value.split()[0]) < 1e-5  # max head difference [m]
-    # equal results: a message instead of a map of rounding noise
-    assert any("hetzelfde resultaat" in s.value for s in at.success)
-    assert not [r for r in at.radio if r.key == "p3_cmp_sit"]
+    assert any("geen oplossing" in e.value for e in at.error)
 
-    # drying cells around a well: MF6 needs Newton, the results differ and the map is shown
-    wells = (p3.WellGroup("bem", ((20, 20), (20, 21)), "freatisch", 0.0, 30.0),)
-    par = p3.Params(wells=wells)
-    at.session_state["p3_result"] = {"params": par, "res": p3.compute(par), "wcs": []}
-    at.run()
-    at.button(key="p3_cmp").click().run()
-    assert not at.exception, [e.value for e in at.exception]
-    assert any("droog" in w.value for w in at.warning)
-    at.radio(key="p3_cmp_sit").set_value("referentie").run()
-    assert not at.exception, [e.value for e in at.exception]
+
+def test_old_project_with_engine_choice_still_loads() -> None:
+    import json
+
+    from project_io import parse_project
+
+    raw = json.dumps({"product": "peilopzet_grid", "versie": 1,
+                      "invoer": {"engine": "eigen", "cell": 25.0}, "objecten": {}})  # fmt: skip
+    data, errors = parse_project(raw)
+    assert not errors and data["invoer"] == {"cell": 25.0}
 
 
 def test_grid_product_line_undo_and_cancel_in_drawing_panel() -> None:
@@ -592,15 +576,16 @@ def test_grid_product_location_sets_rd_origin() -> None:
 
 
 def test_grid_product_location_map_click_moves_centre() -> None:
-    """The location map shows the model area around the centre; a click (handed over as the
-    pending point, as the map does) moves the centre there, within the RD range."""
+    """The location map (folium tiles) shows the model area around the centre; a click
+    (handed over as the pending point, as the map does) moves the centre there, within the
+    RD range."""
     page = str(APP / "pages" / "1_Grondwatertoolbox.py")
     at = _toolbox(page, 120)
     at.toggle(key="p3_geo").set_value(True).run()
     at.number_input(key="p3_cx").set_value(136800.0).run()
     at.number_input(key="p3_cy").set_value(455900.0).run()
-    charts = [c for c in at.get("plotly_chart") if '"modelgebied"' in c.proto.spec]
-    assert len(charts) == 1
+    maps = [m for m in at.get("component_instance") if "modelgebied" in str(m.proto)]
+    assert len(maps) == 1 and "brt-achtergrondkaart" in str(maps[0].proto)
     at.session_state["p3_loc_next"] = (137012, 456321)
     at.run()
     assert (at.number_input(key="p3_cx").value, at.number_input(key="p3_cy").value) == (
@@ -677,12 +662,11 @@ def test_grid_product_background_map(monkeypatch: pytest.MonkeyPatch) -> None:
     at = _toolbox(page, 120)
     at.toggle(key="p3_geo").set_value(True).run()
     at.number_input(key="p3_cx").set_value(120500.0).run()
-    at.selectbox(key="p3_bg").set_value("luchtfoto").run()
-    at.button(key="p3_calc").click().run()
+    at.button(key="p3_calc").click().run()  # PDOK grijs is the default with a location
     assert not at.exception, [e.value for e in at.exception]
-    assert ("luchtfoto", (120000.0, 462500.0, 121000.0, 463500.0)) in seen
+    assert ("grijs", (120000.0, 462500.0, 121000.0, 463500.0)) in seen
     assert at.session_state["p3_fig_draw"].layout.images[0].source.startswith("data:image/jpeg")
-    assert any("Beeldmateriaal" in c.value for c in at.caption)
+    assert any("BRT-Achtergrondkaart grijs" in c.value for c in at.caption)
 
 
 def test_grid_product_top10nl_import(monkeypatch: pytest.MonkeyPatch) -> None:

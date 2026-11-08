@@ -338,38 +338,6 @@ def test_fine_grid_is_fast_enough(cell: float) -> None:
     assert max(res.mass_balance.values()) < 1e-8
 
 
-def test_shared_factorization_matches_fresh_solves() -> None:
-    """Reusing the LU (exact or as PCG preconditioner) and the reference states as start
-    must give the same heads as independent direct solves."""
-    from gwproducten.numeric.grid2d import Factorization, solve_grid
-
-    par = dataclasses.replace(
-        BASE, watercourses=(dataclasses.replace(BASE.watercourses[0], stage_new=-0.3),
-                            *BASE.watercourses[1:]),
-        wells=(p3.WellGroup("Putten", ((20, 30),), "pakket1", 100.0, 600.0),),
-    )  # fmt: skip
-    sub = p3.subsoil_helper(par)
-    T = tuple(n.T for n in sub.nodes)
-    c = sub.stack.node_resistances()
-    cond = p3._cell_conductances(par, sub)
-
-    def run(stage: str, **kw):
-        return solve_grid(
-            T, c, par.nrow, par.ncol, par.cell, par.recharge,
-            p3._boundaries(par, sub, stage, cond), fixed_head=par.boundary_head,
-            fluxes=p3._wells(par, sub, stage), **kw,
-        )  # fmt: skip
-
-    fact = Factorization()
-    ref = run("ref", factorization=fact)
-    shared = run("new", factorization=fact, initial_active=ref.active)
-    fresh = run("new")
-    assert shared.converged and fresh.converged
-    np.testing.assert_allclose(shared.heads, fresh.heads, atol=1e-8)
-    np.testing.assert_allclose(shared.flux_response, fresh.flux_response, atol=1e-8)
-    assert shared.iterations <= fresh.iterations
-
-
 def test_conductance_scales_with_length_per_cell() -> None:
     full = p3.Watercourse(name="sloot", cells=((5, 5), (6, 5)), lengths=(25.0, 25.0))
     half_end = dataclasses.replace(full, lengths=(25.0, 12.5))

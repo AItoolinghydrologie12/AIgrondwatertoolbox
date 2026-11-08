@@ -11,6 +11,7 @@ from toolbox_state import DEFAULTS, KEY, bump, clear_undo, ss
 from ui_common import number, stack_inputs, zone_stack_inputs
 
 from gwproducten.core.layers import SPLIT_RESISTANCE, SPLIT_THICKNESS, LayerStack, split_aquifer
+from gwproducten.core.params import meta
 from gwproducten.products import peilopzet_grid as p3
 
 BOUNDARY_LABEL = {
@@ -24,6 +25,41 @@ BOUNDARY_HELP = (
     "pakket loopt buiten het model door; de rand watert af naar het randpeil met de weerstand "
     "van een half oneindig lekkend pakket (spreidingslengte λ). Gesloten: geen stroming."
 )
+
+
+def size_input(name: str, key: str, size_max: float) -> float:
+    """Model width/height whose maximum follows the cell size; an old value above the new
+    maximum is clipped instead of raising a widget error."""
+    m = meta(p3.Params, name)
+    ss.setdefault(key, float(getattr(DEFAULTS, name)))
+    ss[key] = min(float(ss[key]), size_max)
+    return st.number_input(
+        f"{m['label']} [{m['unit']}]", float(m["min"]), size_max, step=25.0, format="%g",
+        key=key,
+    )  # fmt: skip
+
+
+def model_area_inputs(values: dict[str, Any]) -> None:
+    """Cell size, width and height of the model (three columns); fills ``values``."""
+    st.subheader("Modelgebied")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        values["cell"] = number(
+            p3.Params, "cell", DEFAULTS.cell, f"{KEY}_cell", 5.0,
+            help="Grootte van een rekencel (vierkant). Kleiner = meer detail rond watergangen "
+            "en putten, maar een kleiner modelgebied (max. 100 × 100 cellen).",
+        )  # fmt: skip
+    size_max = p3.MAX_CELLS_PER_SIDE * values["cell"]
+    for col, (name, k) in zip((c2, c3), (("size_x", "sx"), ("size_y", "sy")), strict=True):
+        with col:
+            values[name] = size_input(name, f"{KEY}_{k}", size_max)
+    st.caption(
+        f"Maximaal {p3.MAX_CELLS_PER_SIDE} × {p3.MAX_CELLS_PER_SIDE} cellen: bij "
+        f"{values['cell']:g} m is het model hooguit {size_max:g} m breed en hoog. Bij veel "
+        "lagen minder: "
+        + ", ".join(f"{n} rekenlagen {m} × {m}" for n, m in p3.MAX_CELLS_BY_NODES.items())
+        + "."
+    )
 
 
 def zone_inputs(base: LayerStack) -> dict[int, tuple[LayerStack, float]]:
@@ -104,7 +140,10 @@ def _split_inputs(
 ) -> None:
     """Split an aquifer at the tip of a sheet pile wall: the model lets a wall end at the
     bottom of a whole layer."""
-    with st.expander("Pakket splitsen bij de punt van een damwand", expanded=False):
+    with st.expander(
+        "Geavanceerd: pakket splitsen bij de punt van een damwand", expanded=False,
+        icon=":material/call_split:",
+    ):  # fmt: skip
         st.caption(
             "Het model rekent met één rekenpunt per pakket. Eindigt een damwand halverwege een "
             "pakket, splits het dan hier op de diepte van de punt: de app voegt een scheidende "
@@ -217,7 +256,7 @@ def _boundary_inputs(values: dict[str, Any], stack: LayerStack) -> None:
                     ss[kind_key] = "gesloten"  # project saved with the old on/off switch
                 kind = c1.selectbox(
                     f"Rand {node.label}", p3.RING_KINDS, key=kind_key,
-                    format_func=BOUNDARY_LABEL.get,
+                    format_func=BOUNDARY_LABEL.get, help=BOUNDARY_HELP,
                 )  # fmt: skip
                 head = c2.number_input(
                     f"Stijghoogte rand {node.label} [m NAP]", -50.0, 50.0,
@@ -256,6 +295,7 @@ def subsoil_step(
         apply_split(ss, pending)
         bump()
         clear_undo()  # the old drawings refer to the layers before the split
+    st.divider()
     col_in, col_fig = st.columns([2, 3], gap="large")
     with col_in:
         st.subheader("Lagenopbouw")
@@ -265,6 +305,7 @@ def subsoil_step(
         zone_values = zone_inputs(stack)
         _split_inputs(stack, zone_values, float(ss.get(f"{KEY}_mv", DEFAULTS.surface)))
     with col_fig:
+        st.subheader("Doorsnede")
         zone_names = [z["name"] for z in ss[f"{KEY}_zones"]]
         schematic_of = (
             st.selectbox(
@@ -275,6 +316,10 @@ def subsoil_step(
             else "basis"
         )  # fmt: skip
         schematic_box = st.empty()
+    st.divider()
+    col_surf, col_bnd = st.columns(2, gap="large")
+    with col_surf:
         _surface_inputs(values)
+    with col_bnd:
         _boundary_inputs(values, stack)
     return stack, zone_values, schematic_of, schematic_box

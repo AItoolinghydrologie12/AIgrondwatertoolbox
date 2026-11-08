@@ -15,7 +15,7 @@ VERSION = 1
 
 # input widgets, without the "p3_" prefix
 INPUT_PATTERNS = [
-    r"(sx|sy|cell|thr|gc|conv|engine|mv|rch|wmv|dd|dw|bnd|bh|kwel|phi|ck|mode_top|geo|cx|cy|bg|bg_op|ws_on|ws_level)",
+    r"(sx|sy|cell|thr|gc|conv|mv|rch|wmv|dd|dw|bnd|bh|kwel|phi|ck|mode_top|geo|cx|cy|bg|bg_op|ws_on|ws_level)",
     r"wd_(l1|l2|t1|t2|t3)",
     r"(bfix|bkind|bh)_[a-z0-9]+",
     r"naq_(deklaag|freatisch_zand)",
@@ -23,6 +23,7 @@ INPUT_PATTERNS = [
     r"z\d+_(name|mv)",
     r"z\d+_(deklaag|freatisch_zand)_\d+_\d+_(d|k|c|kh|a)",
 ]
+RETIRED_INPUTS = ("engine",)  # the engine choice (MODFLOW 6 is now the only engine)
 OBJECTS = ("wcs", "drain", "wells", "ghb", "chd", "walls", "zones")
 
 
@@ -94,6 +95,8 @@ def parse_project(text: str | bytes) -> tuple[dict[str, Any] | None, list[str]]:
     if not isinstance(data.get("invoer"), dict) or not isinstance(data.get("objecten"), dict):
         errors.append("Het projectbestand mist 'invoer' of 'objecten'.")
     else:
+        for old in RETIRED_INPUTS:  # saved by an earlier version; no longer used
+            data["invoer"].pop(old, None)
         unknown = [k for k in data["invoer"] if not _is_input(f"x_{k}", "x")]
         if unknown:
             errors.append(f"Onbekende invoer in het projectbestand: {', '.join(unknown[:5])}.")

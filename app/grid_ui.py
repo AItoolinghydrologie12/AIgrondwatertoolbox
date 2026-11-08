@@ -114,6 +114,30 @@ def wc_geometry(
     return cells, tuple(lengths[rc] for rc in cells), (cell_offsets if any(cell_offsets) else None)
 
 
+_GEOMETRY_CACHE: dict[tuple, tuple] = {}
+_GEOMETRY_CACHE_MAX = 512  # watercourse geometries kept (shared; the result is immutable)
+
+
+def wc_geometry_cached(
+    wc: dict[str, Any], cell: float, nrow: int, ncol: int
+) -> tuple[tuple[tuple[int, int], ...], tuple[float, ...], tuple[float, ...] | None]:
+    """:func:`wc_geometry`, remembered per exact input: the page asks for the same
+    geometry several times per run. The key holds everything the geometry depends on."""
+    key = (
+        cell, nrow, ncol, repr(wc.get("lines", [])), repr(wc.get("rel_lines", [])),
+        repr(wc.get("line_offsets")), tuple(sorted(wc.get("points", ()))),
+        float(wc.get("length", 0.0)), wc.get("manual_cell"),
+        tuple(sorted(wc.get("manual", {}).items())),
+    )  # fmt: skip
+    found = _GEOMETRY_CACHE.get(key)
+    if found is None:
+        found = wc_geometry(wc, cell, nrow, ncol)
+        if len(_GEOMETRY_CACHE) >= _GEOMETRY_CACHE_MAX:
+            _GEOMETRY_CACHE.pop(next(iter(_GEOMETRY_CACHE)))  # oldest first
+        _GEOMETRY_CACHE[key] = found
+    return found
+
+
 def line_snap(cell: float, size_x: float, size_y: float) -> float:
     """Spacing of the click points for drawing a line: a fifth of a cell, but at most
     SNAP_POINTS along the longest side (the points go to the browser on every rerun)."""
@@ -304,6 +328,7 @@ def result_figure(
     min_span: float = 0.0,
     walls: list[dict[str, Any]] | None = None,
     wc_style: str = "cellen",
+    hover: str = "%{z:.3f} m",
 ) -> go.Figure:
     """Contour map of a result field with ``limits`` (level, colour, legend name: a thick
     line where the field crosses the level, e.g. the 5 cm limit) and the watercourses
@@ -311,7 +336,7 @@ def result_figure(
     "uit" leaves them out), an optional profile line, and (``click_snap``) a last trace of
     click points on a snap grid.
     ``min_span``: smallest half-range of a diverging scale, so that tiny values stay near
-    white."""
+    white. ``hover``: the value with its unit in the hover text."""
     if diverging:
         vmax = max(float(np.nanmax(np.abs(z))), min_span) or 1.0
         scale = {"colorscale": "RdBu", "zmin": -vmax, "zmax": vmax}
@@ -321,7 +346,7 @@ def result_figure(
     fig = go.Figure(
         go.Contour(
             x=x, y=y, z=z32, ncontours=20, contours={"showlabels": True}, colorbar={"title": label},
-            hovertemplate="x = %{x:.0f} m<br>y = %{y:.0f} m<br>%{z:.3f} m<extra></extra>",
+            hovertemplate="x = %{x:.0f} m<br>y = %{y:.0f} m<br>" + hover + "<extra></extra>",
             **scale,
         )
     )  # fmt: skip

@@ -9,21 +9,18 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
 from grid_ui import to_cells
 from regis_ui import regis_inputs
-from toolbox_state import KEY, MAP_CONFIG, ss
+from toolbox_state import KEY, ss
 
 from gwproducten.core.params import meta
-from gwproducten.geo import ahn, pdok
+from gwproducten.geo import ahn, pdok, rd
 from gwproducten.products import peilopzet_grid as p3
 
 DEFAULT_CENTRE = (155000.0, 463000.0)  # Amersfoort, origin of the RD system
 RD_X, RD_Y = (0.0, 300000.0), (300000.0, 625000.0)  # range of the centre inputs [m]
-LOCMAP_KINDS = {"top10nl": "topografie", "luchtfoto": "luchtfoto"}
-LOCMAP_WIDTHS = {"0,5 km": 500.0, "2 km": 2000.0, "10 km": 10000.0}
-LOCMAP_CLICKS = 80  # click points per side of the location map
+LOCMAP_ZOOM = 14  # start zoom of the location map (about 2 km across)
 FRAME_COLOR = "#d62828"
 
 
@@ -98,80 +95,48 @@ def location_inputs(values: dict[str, Any]) -> None:
 
 
 def location_map(values: dict[str, Any], cx: float, cy: float) -> None:
-    """Map around the model centre (PDOK background) with the model area; a click moves the
-    centre there. The map follows the centre in steps of a tenth of its width, so small moves
-    keep the same (cached) image."""
-    c1, c2 = st.columns(2)
-    kind = c1.segmented_control(
-        "Kaart", list(LOCMAP_KINDS), format_func=LOCMAP_KINDS.get, default="top10nl",
-        required=True, key=f"{KEY}_locmap_bg",
-    )  # fmt: skip
-    width_label = c2.segmented_control(
-        "Kaartbreedte", list(LOCMAP_WIDTHS), default="2 km", required=True,
-        key=f"{KEY}_locmap_w",
-    )  # fmt: skip
-    size = LOCMAP_WIDTHS[width_label]
-    step = size / 10.0
-    mx, my = round(cx / step) * step, round(cy / step) * step
-    bbox = (mx - size / 2, my - size / 2, mx + size / 2, my + size / 2)
-    fig = go.Figure()
-    try:
-        fig.add_layout_image(
-            source=_background_uri(kind, bbox), xref="x", yref="y", x=bbox[0], y=bbox[3],
-            sizex=size, sizey=size, sizing="stretch", layer="below",
-        )  # fmt: skip
-    except pdok.ServiceError as err:
-        st.warning(f"{err} Vul het middelpunt dan in RD in.")
+    """Tile map (PDOK grey, loaded by the browser) with the model area; a click moves the
+    centre there. Panning and zooming happen in the browser without a rerun; only a click
+    reruns the page. The map follows the centre, the model frame is updated in place."""
+    import folium
+    from streamlit_folium import st_folium
+
     x0, y0 = values["origin_x"], values["origin_y"]
     x1, y1 = x0 + values["size_x"], y0 + values["size_y"]
-    fig.add_trace(
-        go.Scatter(
-            x=[x0, x1, x1, x0, x0], y=[y0, y0, y1, y1, y0], mode="lines", name="modelgebied",
-            line={"color": FRAME_COLOR, "width": 3}, hoverinfo="skip",
-        )
+    centre = rd.rd_to_wgs84(cx, cy)
+    base = folium.Map(
+        location=rd.rd_to_wgs84(*DEFAULT_CENTRE), zoom_start=LOCMAP_ZOOM, tiles=None,
+        control_scale=True, max_bounds=True, min_zoom=7,
     )  # fmt: skip
-    fig.add_trace(
-        go.Scatter(
-            x=[cx], y=[cy], mode="markers", name="middelpunt", hoverinfo="skip",
-            marker={"symbol": "cross-thin", "size": 16, "line": {"width": 3, "color": FRAME_COLOR}},
-        )
+    folium.TileLayer(
+        tiles=pdok.TILE_URL_WEB, attr=pdok.TILE_ATTRIBUTION, name="PDOK grijs",
+        max_zoom=19, max_native_zoom=19,
+    ).add_to(base)  # fmt: skip
+    frame = folium.FeatureGroup(name="modelgebied")
+    folium.Polygon(
+        [rd.rd_to_wgs84(x, y) for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))],
+        color=FRAME_COLOR, weight=3, fill=True, fill_opacity=0.05, tooltip="modelgebied",
+    ).add_to(frame)  # fmt: skip
+    folium.CircleMarker(
+        centre, radius=5, color=FRAME_COLOR, fill=True, fill_opacity=1.0,
+        tooltip=f"middelpunt RD {cx:.0f}; {cy:.0f}",
+    ).add_to(frame)  # fmt: skip
+    event = st_folium(
+        base, center=centre, feature_group_to_add=frame, key=f"{KEY}_locmap",
+        returned_objects=["last_clicked"], height=420, use_container_width=True,
     )  # fmt: skip
-    edge = size / LOCMAP_CLICKS
-    grid = np.linspace(-size / 2 + edge / 2, size / 2 - edge / 2, LOCMAP_CLICKS)
-    gx, gy = np.meshgrid(mx + grid, my + grid)
-    fig.add_trace(  # last trace: the click target
-        go.Scatter(
-            x=gx.ravel(), y=gy.ravel(), mode="markers", marker={"size": 8, "opacity": 0},
-            hovertemplate="RD %{x:.0f}; %{y:.0f}<extra>klik = middelpunt</extra>",
-            showlegend=False,
-        )
-    )  # fmt: skip
-    fig.update_layout(
-        height=420, margin={"t": 10, "b": 10, "l": 10, "r": 10}, dragmode="pan",
-        clickmode="event+select", hoverdistance=50, uirevision=str(bbox),
-        xaxis={"range": [bbox[0], bbox[2]], "showgrid": False, "tickformat": ".0f"},
-        yaxis={"range": [bbox[1], bbox[3]], "showgrid": False, "tickformat": ".0f",
-               "scaleanchor": "x"},
-        legend={"orientation": "h", "y": -0.05, "yanchor": "top"},
-    )  # fmt: skip
-    event = st.plotly_chart(
-        fig, key=f"{KEY}_locmap_{width_label}", on_select="rerun", selection_mode=("points",),
-        config=MAP_CONFIG, width="stretch",
-    )  # fmt: skip
-    target = len(fig.data) - 1
-    picked = [
-        (round(float(p["x"])), round(float(p["y"])))
-        for p in (event.selection.get("points", []) if event else [])
-        if p.get("curve_number") == target
-    ]
-    if picked and tuple(picked) != ss.get(f"{KEY}_locmap_used"):
-        ss[f"{KEY}_locmap_used"] = tuple(picked)
-        ss[f"{KEY}_loc_next"] = picked[-1]
-        st.rerun()
+    clicked = (event or {}).get("last_clicked")
+    if clicked:
+        x, y = rd.wgs84_to_rd(float(clicked["lat"]), float(clicked["lng"]))
+        point = (round(x), round(y))
+        if point != ss.get(f"{KEY}_locmap_used"):
+            ss[f"{KEY}_locmap_used"] = point
+            if point != (round(cx), round(cy)):
+                ss[f"{KEY}_loc_next"] = point
+                st.rerun()
     st.caption(
-        f"Klik op de kaart om het middelpunt van het model daar te leggen (op ca. {edge:.0f} m; "
-        "kies een smallere kaart voor meer precisie). Slepen verschuift de kaart, scrollen "
-        f"zoomt. {pdok.BACKGROUND_SOURCE[kind]}."
+        "Klik op de kaart om het middelpunt van het model daar te leggen. Slepen verschuift de "
+        "kaart, scrollen zoomt. Achtergrond: " + pdok.BACKGROUND_SOURCE["grijs"] + "."
     )
 
 
@@ -245,12 +210,7 @@ def ahn_inputs(values: dict[str, Any]) -> None:
     st.caption(f"Bron: {ahn.SOURCE}.")
 
 
-BACKGROUNDS = {
-    "geen": "geen",
-    "top10nl": "topografie (TOP10NL)",
-    "luchtfoto": "luchtfoto",
-    "ahn": "hoogtekaart (AHN)",
-}
+BACKGROUNDS = {"grijs": "PDOK grijs", "geen": "geen"}
 
 
 @st.cache_data(ttl=7 * 24 * 3600, max_entries=20, show_spinner="Kaart ophalen bij PDOK…")
@@ -266,7 +226,7 @@ def model_bbox(origin_x: float, origin_y: float, width: float, height: float) ->
 def background(bbox: pdok.Bbox) -> tuple[str, float] | None:
     """The chosen background map for ``bbox`` as (data URI, opacity), or None (no location,
     'geen', or the service failed; a warning is shown then)."""
-    kind = ss.get(f"{KEY}_bg", "geen")
+    kind = ss.get(f"{KEY}_bg", "grijs")
     if not located() or kind not in pdok.BACKGROUND_SOURCE:
         return None
     try:
@@ -283,14 +243,14 @@ def background_inputs() -> None:
         st.caption("Achtergrondkaart: zet bij stap 1 een locatie aan.")
         return
     if ss.get(f"{KEY}_bg") not in BACKGROUNDS:
-        ss[f"{KEY}_bg"] = "geen"  # e.g. a project saved with the former BGT choice
+        ss[f"{KEY}_bg"] = "grijs"  # also a project saved with a former map (topografie, ...)
     c1, c2 = st.columns([3, 2])
-    c1.selectbox("Achtergrondkaart", list(BACKGROUNDS), format_func=BACKGROUNDS.get,
-                 key=f"{KEY}_bg")  # fmt: skip
+    c1.segmented_control("Achtergrondkaart", list(BACKGROUNDS), format_func=BACKGROUNDS.get,
+                         required=True, key=f"{KEY}_bg")  # fmt: skip
     c2.slider("Zichtbaarheid", 0.1, 1.0, 0.6, 0.1, key=f"{KEY}_bg_op")
 
 
 def background_caption() -> None:
-    kind = ss.get(f"{KEY}_bg", "geen")
+    kind = ss.get(f"{KEY}_bg", "grijs")
     if located() and kind in pdok.BACKGROUND_SOURCE:
         st.caption(f"Achtergrond: {pdok.BACKGROUND_SOURCE[kind]}.")

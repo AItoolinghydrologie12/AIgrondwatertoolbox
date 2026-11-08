@@ -71,18 +71,23 @@ def in_netherlands(x: float, y: float) -> bool:
     return x_min <= x <= x_max and y_min <= y <= y_max
 
 
-# ---- background maps -----------------------------------------------------------------------
+# ---- background map: BRT-Achtergrondkaart grijs (WMTS tiles) --------------------------------
 MAX_PX = 1000  # longest side of a background image [px]
-JPEG_QUALITY = 75
-WMS = {
-    "luchtfoto": ("https://service.pdok.nl/hwh/luchtfotorgb/wms/v1_0", "Actueel_ortho25"),
-    "top10nl": ("https://service.pdok.nl/brt/top10nl/wms/v1_0", "top10nl"),
-    "ahn": ("https://service.pdok.nl/rws/ahn/wms/v1_0", "dtm_05m"),
-}
+JPEG_QUALITY = 80
+WMTS = "https://service.pdok.nl/kadaster/brt-achtergrondkaart/wmts/v2_0/grijs"
+TILE_URL_RD = WMTS + "/EPSG:28992/{z:02d}/{col}/{row}.png"  # for the model maps (RD)
+TILE_URL_WEB = WMTS + "/EPSG:3857/{z}/{x}/{y}.png"  # for the location map (web mercator)
+RD_TILE_ORIGIN = (-285401.92, 903401.92)  # top-left corner of the RD tile matrix set [m]
+RD_RES0 = 3440.64  # resolution of level 0 [m/px]; halves per level
+RD_MAX_LEVEL = 14
+TILE_PX = 256
+MAX_TILES = 64  # safety limit per image
+TILE_ATTRIBUTION = (
+    'Kaartgegevens &copy; <a href="https://www.kadaster.nl">Kadaster</a> '
+    "(BRT-Achtergrondkaart grijs, CC BY 4.0) via PDOK"
+)
 BACKGROUND_SOURCE = {
-    "luchtfoto": "Luchtfoto: Beeldmateriaal Nederland (CC BY 4.0) via PDOK",
-    "top10nl": "Topografie: Kadaster BRT TOP10NL (CC BY 4.0) via PDOK",
-    "ahn": "Hoogtekaart: AHN (CC0) via PDOK",
+    "grijs": "Kadaster BRT-Achtergrondkaart grijs (CC BY 4.0) via PDOK",
 }
 
 Bbox = tuple[float, float, float, float]  # x_min, y_min, x_max, y_max in RD [m]
@@ -95,38 +100,70 @@ def image_size(bbox: Bbox, max_px: int = MAX_PX) -> tuple[int, int]:
     return max(1, round(w * scale)), max(1, round(h * scale))
 
 
-def wms_params(layer: str, bbox: Bbox, size: tuple[int, int], fmt: str) -> dict[str, Any]:
-    """GetMap 1.3.0 in RD; for EPSG:28992 the axis order is x (east), y (north)."""
-    return {
-        "service": "WMS", "version": "1.3.0", "request": "GetMap", "layers": layer,
-        "styles": "", "crs": "EPSG:28992", "bbox": ",".join(f"{v:.2f}" for v in bbox),
-        "width": size[0], "height": size[1], "format": fmt,
-    }  # fmt: skip
+def tile_level(bbox: Bbox, max_px: int = MAX_PX) -> int:
+    """RD tile level whose resolution is closest (in log scale) to ``max_px`` over the bbox."""
+    import math
+
+    target = max(bbox[2] - bbox[0], bbox[3] - bbox[1]) / max_px
+    return min(max(round(math.log2(RD_RES0 / target)), 0), RD_MAX_LEVEL)
 
 
-def _to_jpeg(image: Any) -> bytes:
-    import io
+def tile_range(bbox: Bbox, level: int) -> tuple[range, range]:
+    """Columns and rows of the RD tiles that cover ``bbox`` (rows count down from the top)."""
+    import math
 
-    buffer = io.BytesIO()
-    image.convert("RGB").save(buffer, "JPEG", quality=JPEG_QUALITY, optimize=True)
-    return buffer.getvalue()
+    span = RD_RES0 / 2**level * TILE_PX  # tile size [m]
+    x0, y0 = RD_TILE_ORIGIN
+    cols = range(math.floor((bbox[0] - x0) / span), math.ceil((bbox[2] - x0) / span))
+    rows = range(math.floor((y0 - bbox[3]) / span), math.ceil((y0 - bbox[1]) / span))
+    return cols, rows
 
 
-def background_image(kind: str, bbox: Bbox) -> bytes:
-    """JPEG of the map ``kind`` (top10nl, luchtfoto, ahn) exactly covering ``bbox``."""
+def _tile(url: str) -> Any:
     import io
 
     from PIL import Image
 
-    url, layer = WMS[kind]
-    fmt = "image/jpeg" if kind == "luchtfoto" else "image/png"
-    data = get(url, wms_params(layer, bbox, image_size(bbox), fmt), "De PDOK-kaart").content
+    data = get(url, {}, "De PDOK-achtergrondkaart").content
     try:
-        image = Image.open(io.BytesIO(data))
-    except OSError as err:  # a WMS error document instead of an image
-        raise ServiceError("De PDOK-kaart gaf geen afbeelding terug.") from err
-    if kind == "luchtfoto":
-        return _to_jpeg(image)  # the service's JPEG is about 3 times larger
-    background = Image.new("RGB", image.size, "white")
-    background.paste(image.convert("RGBA"), mask=image.convert("RGBA"))
-    return _to_jpeg(background)
+        return Image.open(io.BytesIO(data)).convert("RGBA")
+    except OSError as err:  # an error document instead of an image
+        raise ServiceError("De PDOK-achtergrondkaart gaf geen afbeelding terug.") from err
+
+
+def background_image(kind: str, bbox: Bbox) -> bytes:
+    """JPEG of the grey BRT background map exactly covering ``bbox``: the RD tiles of a
+    suitable level fetched in parallel, stitched, cropped and resized."""
+    import io
+    from concurrent.futures import ThreadPoolExecutor
+
+    from PIL import Image
+
+    if kind not in BACKGROUND_SOURCE:
+        raise ValueError(f"Onbekende achtergrondkaart: {kind}")
+    level = tile_level(bbox)
+    cols, rows = tile_range(bbox, level)
+    while len(cols) * len(rows) > MAX_TILES and level > 0:
+        level -= 1
+        cols, rows = tile_range(bbox, level)
+    urls = [TILE_URL_RD.format(z=level, col=c, row=r) for r in rows for c in cols]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        tiles = list(pool.map(_tile, urls))
+    mosaic = Image.new("RGBA", (len(cols) * TILE_PX, len(rows) * TILE_PX), "white")
+    for k, tile in enumerate(tiles):
+        r, c = divmod(k, len(cols))
+        mosaic.paste(tile, (c * TILE_PX, r * TILE_PX))
+    res = RD_RES0 / 2**level
+    left = RD_TILE_ORIGIN[0] + cols.start * TILE_PX * res
+    top = RD_TILE_ORIGIN[1] - rows.start * TILE_PX * res
+    box = (
+        (bbox[0] - left) / res, (top - bbox[3]) / res,
+        (bbox[2] - left) / res, (top - bbox[1]) / res,
+    )  # fmt: skip
+    size = image_size(bbox)
+    image = mosaic.resize(size, Image.Resampling.LANCZOS, box=box)
+    background = Image.new("RGB", size, "white")
+    background.paste(image, mask=image)
+    buffer = io.BytesIO()
+    background.save(buffer, "JPEG", quality=JPEG_QUALITY, optimize=True)
+    return buffer.getvalue()

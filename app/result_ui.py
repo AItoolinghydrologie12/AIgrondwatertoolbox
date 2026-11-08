@@ -20,7 +20,7 @@ from profile_ui import (
     wall_crossings,
 )
 from toolbox_state import KEY, MAP_CONFIG, rerun_fragment, ss
-from ui_common import TABS, csv_button, dict_table, png_buttons, split_theory
+from ui_common import TABS, csv_button, dict_table, friendly_errors, png_buttons, split_theory
 
 from gwproducten.products import peilopzet_grid as p3
 from gwproducten.products.peilopzet_grid.gis import to_gpkg
@@ -38,6 +38,23 @@ PROFILE_MODES = {
     "lijn": "Eigen lijn",
 }
 BALANCE_OK = 1e-6
+# value and unit in the hover text of the result map: heads on cm, changes on mm
+HOVER = {
+    "verhoging": "%{z:.3f} m verhoging",
+    "opzet": "%{z:.2f} m NAP",
+    "ref": "%{z:.2f} m NAP",
+    "gws": "%{z:.2f} m onder maaiveld",
+    "putten": "%{z:.3f} m verlaging",
+}
+
+
+def _formats(df: pd.DataFrame, fmt: str) -> dict[str, Any]:
+    """Display format ``fmt`` for every number column of ``df`` (the data stay unrounded)."""
+    return {
+        str(c): st.column_config.NumberColumn(format=fmt)
+        for c in df.columns
+        if pd.api.types.is_float_dtype(df[c])
+    }
 
 
 def limit_lines(threshold: float, view: str) -> list[tuple[float, str, str]]:
@@ -54,7 +71,7 @@ def limit_lines(threshold: float, view: str) -> list[tuple[float, str, str]]:
     return []
 
 
-def show_kpis(params: p3.Params, res: p3.Result, seconds: float) -> None:
+def show_kpis(params: p3.Params, res: p3.Result) -> None:
     rise0 = res.rise[0]
     area_ha = float((rise0 >= params.threshold).sum()) * params.cell**2 / 1e4
     raised = [wc.name for wc in params.watercourses if wc.stage_new != wc.stage_ref]
@@ -62,7 +79,7 @@ def show_kpis(params: p3.Params, res: p3.Result, seconds: float) -> None:
     q_new = float(res.budget.loc[raised, "opzet [m³/d]"].sum()) if raised else 0.0
     wet_extra = res.inundated["opzet"] - res.inundated["referentie"]
     balance = max(res.mass_balance.values())
-    row1 = st.columns(3)
+    row1 = st.columns(4)
     row1[0].metric(
         "Max. verhoging freatisch", f"{np.nanmax(rise0):.2f} m", border=True,
         help="Grootste stijging van de grondwaterstand (opzet − referentie) in het model.",
@@ -79,28 +96,15 @@ def show_kpis(params: p3.Params, res: p3.Result, seconds: float) -> None:
         help="Netto uitwisseling van de watergangen met een ander peil na opzet; "
         "positief = water het grondwater in.",
     )  # fmt: skip
-    row2 = st.columns(3)
-    row2[0].metric(
+    row1[3].metric(
         "Extra cellen met water op maaiveld", f"{wet_extra:d}",
         delta=f"{res.inundated['opzet']} na opzet, {res.inundated['referentie']} referentie",
-        delta_color="off", delta_arrow="off", border=True,
-    )  # fmt: skip
-    row2[1].metric(
-        "Balansfout (max.)", f"{balance:.1e}",
-        delta="in orde" if balance < BALANCE_OK else "controleer",
-        delta_color="normal" if balance < BALANCE_OK else "inverse",
-        delta_arrow="off", border=True,
-    )  # fmt: skip
-    cells = f"{params.nrow * params.ncol:,}".replace(",", ".")
-    row2[2].metric(
-        "Rekentijd", f"{seconds:.1f} s",
-        delta=f"{cells} cellen × {len(res.node_labels)} lagen",
         delta_color="off", delta_arrow="off", border=True,
     )  # fmt: skip
     drawdown = -float(np.nanmin(rise0))
     if drawdown >= DRAWDOWN_SHOWN:  # e.g. a dewatering: the same figures for the drawdown
         area_dd = float((rise0 <= -params.threshold).sum()) * params.cell**2 / 1e4
-        row3 = st.columns(3)
+        row3 = st.columns(4)
         row3[0].metric(
             "Max. verlaging freatisch", f"{drawdown:.2f} m", border=True,
             help="Grootste daling van de grondwaterstand (referentie − opzet) in het model.",
@@ -109,8 +113,19 @@ def show_kpis(params: p3.Params, res: p3.Result, seconds: float) -> None:
             f"Oppervlak verlaging ≥ {params.threshold * 100:.0f} cm", f"{area_dd:.1f} ha",
             border=True, help="Som van de cellen waar de freatische verlaging de grens haalt.",
         )  # fmt: skip
-    for w_msg in res.warnings:
-        st.warning(w_msg)
+    cells = f"{params.nrow * params.ncol:,}".replace(",", ".")
+    check = "in orde" if balance < BALANCE_OK else ":red[**controleer de invoer**]"
+    engine_badge(
+        res,
+        f" · {cells} cellen × {len(res.node_labels)} lagen · balansfout {balance:.1e} ({check})",
+    )
+    if res.warnings:
+        n = len(res.warnings)
+        with st.expander(
+            f"Meldingen bij deze berekening ({n})", expanded=n <= 3, icon=":material/warning:"
+        ):
+            for w_msg in res.warnings:
+                st.warning(w_msg)
 
 
 def profile_points(params: p3.Params) -> list[tuple[float, float]]:
@@ -201,6 +216,7 @@ def show_result(
         z, label, rev = res.well_drawdown[j], "verlaging [m]", False
     else:
         z, label, rev = res.surface - res.heads_new[0], "diepte gws [m-mv]", True
+    hover = HOVER[view]
     map_box = st.container()
     pts = profile_points(params)
     clicking = ss.get(f"{KEY}_pmode") == "lijn"
@@ -212,6 +228,7 @@ def show_result(
         profile=pts, click_snap=snap if clicking else None,
         wells=[{"name": g.name, "cells": g.cells} for g in params.wells],
         walls=[{"name": w.name, "faces": w.faces} for w in params.walls], wc_style=wc_style,
+        hover=hover,
     )  # fmt: skip
     bg = background(model_bbox(params.origin_x, params.origin_y, params.size_x, params.size_y))
     if bg is not None:
@@ -274,15 +291,17 @@ def show_result(
     with st.expander("Waterbalans en conductances", expanded=False):
         st.markdown("**Waterbalans [m³/d]**")
         st.plotly_chart(budget_figure(res.budget), width="stretch")
-        st.dataframe(res.budget.round(2))
+        st.dataframe(res.budget, column_config=_formats(res.budget, "%.1f"))
         st.caption(
             "Positief = water het grondwater in. 'rand' = in/uitstroom over de vaste modelrand."
         )
         st.markdown("**Conductance per cel** (gemiddeld over de cellen van de watergang)")
-        st.dataframe(res.conductances.round(3), hide_index=True)
+        st.dataframe(
+            res.conductances, hide_index=True, column_config=_formats(res.conductances, "%.3f")
+        )
     if res.walls is not None:
         with st.expander("Damwanden: doorstroming", expanded=False):
-            st.dataframe(res.walls.round(2), hide_index=True)
+            st.dataframe(res.walls, hide_index=True, column_config=_formats(res.walls, "%.2f"))
             st.caption(
                 "Som van |q| over alle celranden van de wand, per doorsneden laag [m³/d]: hoeveel "
                 "water er nog door de wand gaat (0 bij een ondoorlatende wand). Geen post in de "
@@ -290,7 +309,7 @@ def show_result(
             )
     if res.wells is not None:
         with st.expander("Putten: verlaging in de put", expanded=view == "putten"):
-            st.dataframe(res.wells.round(2), hide_index=True)
+            st.dataframe(res.wells, hide_index=True, column_config=_formats(res.wells, "%.2f"))
             st.caption(
                 "De kaart toont het celgemiddelde. De stijghoogte in de put volgt uit de "
                 "Peaceman-correctie −Q/(2πT)·ln(0,198·Δx/r_w), met de putstraal r_w en T van "
@@ -306,30 +325,38 @@ def result_panel(
     """The result map, profile and tables as a fragment: choosing another map, layer or
     profile reruns only this panel. ``out`` receives the figures and the profile table for
     the export (a plain dict, so a deferred download reads the latest profile)."""
-    out["fig_res"], out["fig_prof"], out["prof"] = show_result(params, res, wcs_done)
+    with friendly_errors():
+        out["fig_res"], out["fig_prof"], out["prof"] = show_result(params, res, wcs_done)
 
 
 def show_validation(params: p3.Params, res: p3.Result) -> None:
+    st.markdown("**Deze berekening**")
     st.markdown(
-        "**Controles bij de berekende invoer.** Automatische tests: "
-        "`tests/test_peilopzet_grid.py` en `tests/test_polyline.py` (parabool tussen twee "
-        "sloten, maaivelddrainage, RIV-begrenzing, drain, buisdrainage per cel, lengte per "
-        "cel, lijn → cellen, peilopzet vs 1D-analytisch met en zonder celgrootte-correctie, "
-        "gridverfijning, massabalans) en `tests/test_wall.py` (damwand: strook tegen de "
-        "serieweerstand, ingesloten bouwput, lekkende wand, gesplitst pakket, gridverfijning)."
-    )
-    st.markdown(
-        "**Vergelijking met MODFLOW 6** (`tests/test_mf6_comparison.py`, lokaal met flopy): "
-        "zelfde rooster met elke laag als MF6-modellaag. Stijghoogten gelijk binnen 10⁻⁶ m "
-        "voor vaste en meebewegende T (MF6 'convertible'), putten, kwel, zones, alle "
-        "randtypen en damwanden (HFB-pakket). Verschillen alleen bij droogvallende cellen en "
-        "t.o.v. MF6-Newton (stroomopwaartse weging van de natte dikte, enkele cm bij grote "
-        "verlaging)."
+        f"- Rekenkern: **{res.engine_note}** (MODFLOW 6 van de USGS; Langevin e.a., 2017). "
+        "Elke laag is een MODFLOW-laag; scheidende lagen rekenen met hun weerstand c.\n"
+        "- Waterbalans: wat erin gaat, gaat er ook uit; de fout hieronder hoort klein te "
+        "zijn (< 10⁻⁶).\n"
+        "- Bij droogvallende cellen rekent MODFLOW 6 met de Newton-methode; vraagt een put "
+        "meer dan de laag kan leveren, dan levert hij minder (met melding)."
     )
     st.dataframe(dict_table(res.mass_balance, "Massabalansfout [-]", "{:.1e}"), hide_index=True)
     st.dataframe(
-        dict_table({f"Iteraties RIV/DRN {k}": v for k, v in res.iterations.items()}, fmt="{:.0f}"),
+        dict_table(
+            {f"Iteraties MODFLOW 6 {k}": v for k, v in res.iterations.items()}, fmt="{:.0f}"
+        ),  # fmt: skip
         hide_index=True,
+    )
+    st.markdown("**Hoe is de app getoetst?**")
+    st.markdown(
+        "- Peilopzet bij lange evenwijdige sloten tegen de analytische meerlagenoplossing: "
+        "binnen 0,6 % (met celgrootte-correctie).\n"
+        "- Grondwaterstand tussen twee vaste peilen met neerslag: exact de parabool; "
+        "freatisch pakket tegen Dupuit binnen 1 cm.\n"
+        "- Put in een lekkend pakket tegen De Glee: binnen 2 % vanaf 3 cellen van de put.\n"
+        "- Damwand: exact de extra weerstand; ingesloten bouwput zonder verlaging erbuiten.\n"
+        "- Tien vaste testmodellen (putten, kwel, zones, alle randtypen, damwanden): "
+        "stijghoogten binnen 0,01 mm van de referentie.\n"
+        "- Roosterverfijning convergeert; de waterbalans sluit in alle gevallen."
     )
     st.markdown("**Benchmark: lange evenwijdige sloten tegen de analytische peilopzet**")
     st.caption(
@@ -374,83 +401,93 @@ def show_export(
     figures: dict[str, go.Figure],
     out: dict[str, Any],
 ) -> None:
-    csv_button(lambda: grid_table(res), "peilopzet2d_rooster.csv", "Rooster (CSV)")
-    csv_button(
-        res.budget.reset_index(names="post"), "peilopzet2d_waterbalans.csv", "Waterbalans (CSV)"
-    )
-    if res.wells is not None:
-        csv_button(res.wells, "peilopzet2d_putten.csv", "Putten (CSV)")
-    if res.walls is not None:
-        csv_button(res.walls, "peilopzet2d_damwanden.csv", "Damwanden: doorstroming (CSV)")
-        faces = pd.DataFrame(
-            [
-                {"damwand": w.name, "rij": r, "kolom": c,
-                 "rand": "oost van de cel" if axis == "x" else "noord van de cel"}
-                for w in params.walls
-                for r, c, axis in w.faces
-            ]
-        )  # fmt: skip
-        csv_button(faces, "peilopzet2d_damwand_celranden.csv", "Damwanden: celranden (CSV)")
-    cells = pd.DataFrame(
-        [
-            {"watergang": wc["name"], "rij": r, "kolom": c, "lengte [m]": length}
-            for wc in wcs_done
-            for (r, c), length in zip(wc["cells"], wc["lengths"], strict=True)
-        ]
-        + [{"watergang": "buisdrainage", "rij": r, "kolom": c} for r, c in params.drain_cells]
-    )
-    cells = pd.concat(
-        [
-            cells,
-            pd.DataFrame(
+    top, bottom = st.columns(2), st.columns(2)
+    with top[0].container(border=True):
+        st.markdown("**Tabellen (CSV)**")
+        st.caption("Puntkomma-gescheiden, decimale komma: direct te openen in Excel.")
+        csv_button(lambda: grid_table(res), "peilopzet2d_rooster.csv", "Rooster (CSV)")
+        csv_button(
+            res.budget.reset_index(names="post"), "peilopzet2d_waterbalans.csv", "Waterbalans (CSV)"
+        )
+        if res.wells is not None:
+            csv_button(res.wells, "peilopzet2d_putten.csv", "Putten (CSV)")
+        if res.walls is not None:
+            csv_button(res.walls, "peilopzet2d_damwanden.csv", "Damwanden: doorstroming (CSV)")
+            faces = pd.DataFrame(
                 [
-                    {"watergang": f"{g.name} ({kind})", "rij": r, "kolom": c}
-                    for kind, grp in (
-                        ("put", params.wells),
-                        ("GHB", params.ghb),
-                        ("CHD", params.chd),
-                    )
-                    for g in grp
-                    for r, c in g.cells
-                ],
-                columns=["watergang", "rij", "kolom"],
-            ),
-        ],
-        ignore_index=True,
-    )
-    csv_button(cells, "peilopzet2d_cellen.csv", "Getekende cellen (CSV)")
-    if out.get("prof") is not None:
-        csv_button(lambda: out["prof"].round(4), "peilopzet2d_profiel.csv", "Dwarsprofiel (CSV)")
-    png_buttons(figures, KEY)
-    st.markdown("**GIS (QGIS)**")
-    located = not (params.origin_x == 0.0 and params.origin_y == 0.0)
-    wc_lines = {wc["name"]: wc.get("lines", []) for wc in wcs_done}
-    st.download_button(
-        "GIS-bestand (GeoPackage)", lambda: to_gpkg(params, res, wc_lines),
-        file_name="grondwatertoolbox.gpkg", mime="application/geopackage+sqlite3",
-        icon=":material/map:", key=f"{KEY}_gpkg", disabled=not located, on_click="ignore",
-    )  # fmt: skip
-    st.caption(
-        "Eén bestand voor QGIS (slepen in het kaartvenster), in RD (EPSG:28992), met de lagen "
-        f"contouren_verhoging (elke {params.threshold * 100:.0f} cm per rekenlaag; negatief = "
-        "verlaging; grens = 1 voor de beoordelingsgrens), modelgebied, watergangen (lijnen en "
-        "rekencellen), putten, ghb_chd en damwanden."
-        if located
-        else "Zet bij stap 1 een locatie aan: zonder RD-coördinaten komt het bestand op de "
-        "verkeerde plek in QGIS."
-    )
-    st.markdown("**MODFLOW 6-model**")
-    st.caption(
-        "Dezelfde berekening als invoerbestanden voor MODFLOW 6 (referentie en opzet, met een "
-        "LEESMIJ), om zelf te draaien of na te lopen. Bevat alleen modelinvoer."
-    )
-    if st.button("MODFLOW 6-model maken", key=f"{KEY}_mf6zip"):
-        ss[f"{KEY}_mf6zip_for"] = params
-    if ss.get(f"{KEY}_mf6zip_for") == params:
+                    {"damwand": w.name, "rij": r, "kolom": c,
+                     "rand": "oost van de cel" if axis == "x" else "noord van de cel"}
+                    for w in params.walls
+                    for r, c, axis in w.faces
+                ]
+            )  # fmt: skip
+            csv_button(faces, "peilopzet2d_damwand_celranden.csv", "Damwanden: celranden (CSV)")
+        cells = pd.DataFrame(
+            [
+                {"watergang": wc["name"], "rij": r, "kolom": c, "lengte [m]": length}
+                for wc in wcs_done
+                for (r, c), length in zip(wc["cells"], wc["lengths"], strict=True)
+            ]
+            + [{"watergang": "buisdrainage", "rij": r, "kolom": c} for r, c in params.drain_cells]
+        )
+        cells = pd.concat(
+            [
+                cells,
+                pd.DataFrame(
+                    [
+                        {"watergang": f"{g.name} ({kind})", "rij": r, "kolom": c}
+                        for kind, grp in (
+                            ("put", params.wells),
+                            ("GHB", params.ghb),
+                            ("CHD", params.chd),
+                        )
+                        for g in grp
+                        for r, c in g.cells
+                    ],
+                    columns=["watergang", "rij", "kolom"],
+                ),
+            ],
+            ignore_index=True,
+        )
+        csv_button(cells, "peilopzet2d_cellen.csv", "Getekende cellen (CSV)")
+        if out.get("prof") is not None:
+            csv_button(
+                lambda: out["prof"].round(4), "peilopzet2d_profiel.csv", "Dwarsprofiel (CSV)"
+            )
+    with top[1].container(border=True):
+        st.markdown("**Figuren (PNG)**")
+        png_buttons(figures, KEY)
+    with bottom[0].container(border=True):
+        st.markdown("**GIS (QGIS)**")
+        located = not (params.origin_x == 0.0 and params.origin_y == 0.0)
+        wc_lines = {wc["name"]: wc.get("lines", []) for wc in wcs_done}
         st.download_button(
-            "MODFLOW 6-model (zip)", model_zip(params), file_name="grondwatertoolbox_mf6.zip",
-            mime="application/zip", icon=":material/download:", key=f"{KEY}_mf6zip_dl",
+            "GIS-bestand (GeoPackage)", lambda: to_gpkg(params, res, wc_lines),
+            file_name="grondwatertoolbox.gpkg", mime="application/geopackage+sqlite3",
+            icon=":material/map:", key=f"{KEY}_gpkg", disabled=not located, on_click="ignore",
         )  # fmt: skip
+        st.caption(
+            "Eén bestand voor QGIS (slepen in het kaartvenster), in RD (EPSG:28992), met de lagen "
+            f"contouren_verhoging (elke {params.threshold * 100:.0f} cm per rekenlaag; negatief = "
+            "verlaging; grens = 1 voor de beoordelingsgrens), modelgebied, watergangen (lijnen en "
+            "rekencellen), putten, ghb_chd en damwanden."
+            if located
+            else "Zet bij stap 1 een locatie aan: zonder RD-coördinaten komt het bestand op de "
+            "verkeerde plek in QGIS."
+        )
+    with bottom[1].container(border=True):
+        st.markdown("**MODFLOW 6-model**")
+        st.caption(
+            "Dezelfde berekening als invoerbestanden voor MODFLOW 6 (referentie en opzet, met een "
+            "LEESMIJ), om zelf te draaien of na te lopen. Bevat alleen modelinvoer."
+        )
+        if st.button("MODFLOW 6-model maken", key=f"{KEY}_mf6zip"):
+            ss[f"{KEY}_mf6zip_for"] = params
+        if ss.get(f"{KEY}_mf6zip_for") == params:
+            st.download_button(
+                "MODFLOW 6-model (zip)", model_zip(params), file_name="grondwatertoolbox_mf6.zip",
+                mime="application/zip", icon=":material/download:", key=f"{KEY}_mf6zip_dl",
+            )  # fmt: skip
 
 
 theory, assumptions = split_theory(p3.THEORY)
@@ -460,8 +497,7 @@ NO_RESULT = "Nog geen resultaat: klik op **Bereken**."
 def result_tabs(done: dict[str, Any] | None, fig_draw: go.Figure) -> None:
     """Key figures and the tabs Resultaat · Theorie · Aannames · Validatie · Export."""
     if done is not None:
-        engine_badge(done["params"], done["res"])
-        show_kpis(done["params"], done["res"], done["res"].seconds)
+        show_kpis(done["params"], done["res"])
     t_res, t_theory, t_ass, t_val, t_exp = st.tabs(TABS)
     with t_theory:
         st.markdown(theory)
@@ -477,7 +513,13 @@ def result_tabs(done: dict[str, Any] | None, fig_draw: go.Figure) -> None:
     with t_val:
         show_validation(done["params"], done["res"])
     with t_exp:
-        figs = {"peilopzet2d_kaart": out["fig_res"], "peilopzet2d_tekening": fig_draw}
-        if out["fig_prof"] is not None:
-            figs["peilopzet2d_profiel"] = out["fig_prof"]
+        figs = {
+            name: fig
+            for name, fig in (
+                ("peilopzet2d_kaart", out.get("fig_res")),
+                ("peilopzet2d_tekening", fig_draw),
+                ("peilopzet2d_profiel", out.get("fig_prof")),
+            )
+            if fig is not None
+        }
         show_export(done["params"], done["res"], done["wcs"], figs, out)

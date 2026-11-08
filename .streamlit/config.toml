@@ -4,7 +4,23 @@
 [browser]
 gatherUsageStats = false
 
+# Rustig, zakelijk thema: wit werkvlak, waterschapsblauw als accent, lichtgrijsblauwe vakken.
+# Altijd licht (base = "light"), zodat kaarten en figuren er overal hetzelfde uitzien.
 [theme]
+base = "light"
 primaryColor = "#0b5394"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f2f5f9"
+textColor = "#1f2a37"
+linkColor = "#0b5394"
 borderColor = "#d0dbe8"
 showWidgetBorder = true
+dataframeHeaderBackgroundColor = "#eef2f7"
+font = "sans-serif"
+headingFont = "sans-serif"
+baseRadius = "medium"
+chartCategoricalColors = ["#0b5394", "#6fa8dc", "#e69138", "#6aa84f", "#999999", "#a64d79"]
+
+[theme.sidebar]
+backgroundColor = "#eef2f7"
+secondaryBackgroundColor = "#ffffff"

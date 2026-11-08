@@ -1,9 +1,10 @@
 """Sheet pile walls (damwanden) on cell faces: the solver against the series-resistance
 formula, the face geometry, an enclosed building pit, a leaky pit's inflow, a partial wall,
-validation messages, splitting an aquifer at the wall tip, and grid refinement. The comparison
-with MODFLOW 6 (HFB) is in test_mf6_comparison.py."""
+validation messages, splitting an aquifer at the wall tip, and grid refinement. All with
+MODFLOW 6 (HFB package); more wall cases in test_mf6_reference.py."""
 
 import dataclasses
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -11,42 +12,50 @@ import pytest
 from gwproducten.core.grids import outline_faces, polyline_faces
 from gwproducten.core.layers import DEFAULT_ANISOTROPY, LayerStack, build_layers, split_aquifer
 from gwproducten.core.params import ParamError
-from gwproducten.numeric.grid2d import Barrier, HeadBoundary, solve_grid
+from gwproducten.numeric.grid2d import Barrier, HeadBoundary
 from gwproducten.products import peilopzet_grid as p3
+from gwproducten.products.peilopzet_grid import mf6
+
+pytestmark = pytest.mark.skipif(not mf6.available(), reason="mf6 niet geïnstalleerd")
 
 PIT = tuple((r, c) for r in range(18, 22) for c in range(18, 22))  # 100 x 100 m, model centre
 
 
-def _strip(hydchr: float) -> tuple[float, float, float]:
+def _strip(hydchr: float, tmp_path: Path) -> tuple[float, float, float]:
     """3 x 10 strip, cells 10 m, T = 50 (k 5, D 10), GHB at both ends, a wall between columns
-    4 and 5 in every row. Returns (inflow left, outflow right, flow through the wall)."""
+    4 and 5 in every row; MODFLOW 6. Returns (inflow left, outflow right, flow through the
+    wall)."""
     nrow, ncol, cell, k, D = 3, 10, 10.0, 5.0, 10.0
+    stack = LayerStack("freatisch_zand", build_layers("freatisch_zand", [(D, k)], []))
+    par = p3.Params(stack=stack, surface=D, recharge=0.0, size_x=ncol * cell,
+                    size_y=nrow * cell, cell=cell, watercourses=(), convertible=False,
+                    boundary_head=0.5)  # geometry only, not validated  # fmt: skip
     idx = np.arange(nrow * ncol).reshape(nrow, ncol)
     ends = [
         HeadBoundary(name, "ghb", idx[:, col], np.full(nrow, 1e3), np.full(nrow, h), np.zeros(nrow))
         for name, col, h in (("links", 0, 1.0), ("rechts", ncol - 1, 0.0))
     ]
     wall = Barrier("wand", 0, idx[:, 4], idx[:, 5], np.full(nrow, hydchr), np.full((2, nrow), D))
-    sol = solve_grid([k * D], [], nrow, ncol, cell, 0.0, ends, barriers=[wall])
-    assert hydchr == 0 or sol.mass_balance_error < 1e-10  # (relative: undefined at no flow)
+    sol, _ = mf6.solve(par, ends, [], (None,), [np.full((nrow, ncol), k * D)], [], tmp_path,
+                       barriers=[wall])  # fmt: skip
     flow = sol.barrier_flow[0]
     assert flow.shape == (nrow,)
     return sol.fluxes["links"], -sol.fluxes["rechts"], float(flow.sum())
 
 
-def test_strip_wall_is_extra_length_k_cw() -> None:
-    """Q = T B dh / (L + k c_w) per row, plus the two GHB resistances: exact."""
+def test_strip_wall_is_extra_length_k_cw(tmp_path: Path) -> None:
+    """Q = T B dh / (L + k c_w) per row, plus the two GHB resistances (MF6 budget precision)."""
     c_w, T, k, cell, B = 20.0, 50.0, 5.0, 10.0, 10.0
-    q_in, q_out, q_wall = _strip(1.0 / c_w)
+    q_in, q_out, q_wall = _strip(1.0 / c_w, tmp_path)
     L = 9 * cell  # nine faces between the centres of column 0 and column 9
     per_row = 1.0 / (2 / 1e3 + (L + k * c_w) / (T * B))
-    assert q_in == pytest.approx(3 * per_row, rel=1e-10)
-    assert q_out == pytest.approx(q_in, rel=1e-10) and q_wall == pytest.approx(q_in, rel=1e-10)
+    assert q_in == pytest.approx(3 * per_row, rel=1e-5)
+    assert q_out == pytest.approx(q_in, rel=1e-5) and q_wall == pytest.approx(q_in, rel=1e-5)
 
 
-def test_impermeable_wall_stops_the_flow() -> None:
-    q_in, q_out, q_wall = _strip(0.0)
-    assert abs(q_in) < 1e-10 and abs(q_out) < 1e-10 and abs(q_wall) < 1e-10
+def test_impermeable_wall_stops_the_flow(tmp_path: Path) -> None:
+    q_in, q_out, q_wall = _strip(0.0, tmp_path)
+    assert abs(q_in) < 1e-6 and abs(q_out) < 1e-6 and abs(q_wall) < 1e-10
 
 
 def test_outline_faces_of_a_selection() -> None:
@@ -82,8 +91,8 @@ def test_enclosed_pit_to_the_base_no_drawdown_outside() -> None:
     res = p3.compute(_pit(5.0))  # 5 < recharge inside = 16 * 625 * 0.0008 = 8 m3/d
     outside = np.ones((40, 40), dtype=bool)
     outside[18:22, 18:22] = False
-    assert np.max(np.abs(res.well_drawdown[:, outside])) < 1e-9
-    assert np.all(res.well_drawdown[:, ~outside] > -1e-9)
+    assert np.max(np.abs(res.well_drawdown[:, outside])) < 1e-6  # MF6 closure 1e-7 m
+    assert np.all(res.well_drawdown[:, ~outside] > -1e-6)
 
 
 def test_enclosed_pit_without_supply_is_a_clear_error() -> None:
